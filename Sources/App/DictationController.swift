@@ -232,7 +232,10 @@ final class DictationController {
                     let preview = self.settings.injectUnconfirmedText
                         ? HypothesisText.join(confirmed: confirmed, volatile: volatile)
                         : confirmed
-                    self.imk.renderMarked(self.unifyForIMK(preview))
+                    // Post-process (ITN + user replacements) before previewing so the
+                    // live composition matches the post-processed final commit.
+                    let processed = TranscriptPostProcessor.apply(preview, settings: self.settings)
+                    self.imk.renderMarked(self.unifyForIMK(processed))
                 }
             } else {
                 switch self.sessionMode {
@@ -245,7 +248,9 @@ final class DictationController {
                     let target = self.settings.injectUnconfirmedText
                         ? HypothesisText.join(confirmed: confirmed, volatile: volatile)
                         : confirmed
-                    self.injector.render(target)
+                    // Post-process (ITN + user replacements); the injector diffs, so
+                    // collapsing e.g. "two"->"2" just re-types the changed tail.
+                    self.injector.render(TranscriptPostProcessor.apply(target, settings: self.settings))
                 case .overlayPaste:
                     // Re-check secure input every update: if it turned on mid-session
                     // (focus moved into a password field), stop mirroring and hide the
@@ -281,9 +286,10 @@ final class DictationController {
         phase = .finishing
         mic.endCapture()
 
-        // Authoritative full-buffer pass, then reconcile the on-screen text to it
-        // (fixes any tail the streaming passes left wrong) and save to history.
-        let finalText = await streaming.finish()
+        // Authoritative full-buffer pass, post-processed (ITN + user replacements),
+        // then reconcile the on-screen text to it (fixes any tail the streaming
+        // passes left wrong) and save to history.
+        let finalText = TranscriptPostProcessor.apply(await streaming.finish(), settings: settings)
         if sessionUsesIMK {
             // Commit the authoritative final text through the IME (replaces the live
             // composition, ending it), then disengage (just-in-time restores the
