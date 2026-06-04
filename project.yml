@@ -1,0 +1,107 @@
+# Relay — XcodeGen project definition.
+# The .xcodeproj is generated from THIS file and is git-ignored; never edit the
+# project in Xcode and expect it to persist. Regenerate with `make generate`.
+#
+# Signing is local/ad-hoc only (CODE_SIGN_IDENTITY = "-", no team). To ship with
+# a Developer ID later: set DEVELOPMENT_TEAM, flip CODE_SIGN_IDENTITY to your
+# "Developer ID Application" identity, turn ENABLE_HARDENED_RUNTIME on, and add a
+# notarization step. None of that requires touching source code.
+
+name: Relay
+
+options:
+  bundleIdPrefix: com.relay
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+# Build settings shared by every target (only one target today).
+settings:
+  base:
+    # --- Language & concurrency -------------------------------------------------
+    # Swift 6 language mode with Xcode 26 "approachable concurrency": code is
+    # MainActor-isolated by DEFAULT, so UI/AppKit code needs no annotations and we
+    # opt INTO concurrency explicitly with `actor`/`nonisolated` (ASR + injection).
+    SWIFT_VERSION: "6.0"
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+
+    # --- Signing: local / ad-hoc only ------------------------------------------
+    # TODO(signing): set DEVELOPMENT_TEAM + a Developer ID identity to make TCC
+    # (Accessibility/Microphone) permissions persist across rebuilds.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    # Hardened runtime off until notarization; do NOT enable the App Sandbox — this
+    # app injects system-wide keystrokes and reads the global AX focus.
+    ENABLE_HARDENED_RUNTIME: NO
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+    # --- Misc -------------------------------------------------------------------
+    DEAD_CODE_STRIPPING: YES
+    GCC_OPTIMIZATION_LEVEL: 0
+    SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    COMBINE_HIDPI_IMAGES: YES
+
+packages:
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio.git
+    exactVersion: 0.15.0
+
+targets:
+  Relay:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Sources
+        excludes:
+          - "Probe/**"   # the headless diagnostic CLI is its own target
+    dependencies:
+      - package: FluidAudio
+        product: FluidAudio
+    settings:
+      base:
+        PRODUCT_NAME: Relay
+        # TODO(bundle-id): change to your own reverse-DNS identifier. Keep it
+        # STABLE — ad-hoc signing already makes TCC grants fragile across rebuilds;
+        # a changing bundle id would drop permissions every time.
+        PRODUCT_BUNDLE_IDENTIFIER: com.relay.Relay
+        INFOPLIST_FILE: Support/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Support/Relay.entitlements
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+
+  # Headless diagnostic: downloads Parakeet v3 into Relay's Application Support
+  # Models dir and batch-transcribes a file. Used to prove the ASR pipeline
+  # outside the GUI. Shares the real ParakeetModel + AppPaths code with the app.
+  relay-asr-probe:
+    type: tool
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Sources/Probe
+      - path: Sources/Shared/AppPaths.swift
+      - path: Sources/ASR/ParakeetModel.swift
+      - path: Sources/ASR/StreamingTranscriber.swift
+      - path: Sources/Audio/AudioInputDevice.swift
+      - path: Sources/Audio/CoreAudioDevices.swift
+      - path: Sources/Audio/AudioLevelMeter.swift
+      - path: Sources/Audio/AudioCaptureEngine.swift
+      - path: Sources/Config/Keybind.swift
+      - path: Sources/Hotkey/HotkeyMatcher.swift
+      - path: Sources/Injection/TextDiff.swift
+    dependencies:
+      - package: FluidAudio
+        product: FluidAudio
+    settings:
+      base:
+        PRODUCT_NAME: relay-asr-probe
+        PRODUCT_BUNDLE_IDENTIFIER: com.relay.Relay.asr-probe
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"

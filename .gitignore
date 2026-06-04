@@ -1,0 +1,21 @@
+# XcodeGen output — the project is regenerated from project.yml, never edited by hand.
+*.xcodeproj/
+
+# Build products / derived data
+build/
+DerivedData/
+*.xcresult
+
+# SwiftPM
+.swiftpm/
+.build/
+
+# macOS
+.DS_Store
+
+# Local Xcode user state
+xcuserdata/
+*.xcuserstate
+
+# Downloaded ML models / app support (never check models into git)
+Models/

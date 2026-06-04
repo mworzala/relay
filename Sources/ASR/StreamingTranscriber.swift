@@ -1,0 +1,154 @@
+import AVFoundation
+import Observation
+import FluidAudio
+
+/// Live transcription via **LocalAgreement-2** over the full-quality batch Parakeet
+/// engine, with **adaptive re-inference frequency** to keep CPU bounded.
+///
+/// We keep the whole utterance buffer and re-transcribe it, committing the
+/// word-prefix that two consecutive hypotheses agree on (frozen) while the tail
+/// stays volatile. Re-transcribing the *whole* buffer is what makes each
+/// hypothesis internally coherent — no window seams, no dedup, no timing-drift
+/// artifacts — but doing it at a fixed 250 ms cadence is O(N²) and pegs the CPU.
+///
+/// So the pass interval scales with the buffer length: short utterances update
+/// briskly; as the buffer grows the interval grows too, holding the CPU duty cycle
+/// roughly constant (~half a core) no matter how long you talk. On `finish()` a
+/// single authoritative full-buffer pass produces the final transcript.
+@MainActor
+@Observable
+final class StreamingTranscriber {
+    private(set) var confirmed = ""
+    private(set) var volatile = ""
+    private(set) var isStreaming = false
+
+    @ObservationIgnored
+    var onUpdate: (@MainActor (_ confirmed: String, _ volatile: String) -> Void)?
+
+    @ObservationIgnored private var manager: AsrManager?
+    @ObservationIgnored private var language: Language?
+    @ObservationIgnored private var decoderLayers = 2
+    @ObservationIgnored private var loop: Task<Void, Never>?
+
+    @ObservationIgnored private var samples: [Float] = []
+    @ObservationIgnored private var prevWords: [String] = []
+    @ObservationIgnored private var confirmedWords: [String] = []   // strictly-growing committed prefix
+
+    private let sampleRate = 16_000
+    private let minSamples = 8_000          // ~0.5s before first inference
+    private let baseIntervalMs = 280
+    /// Added per second of buffered audio: keeps (pass time)/(interval) bounded.
+    private let intervalPerSecondMs = 60
+
+    func start(manager: AsrManager, language: Language? = nil) {
+        self.manager = manager
+        self.language = language
+        samples = []
+        prevWords = []
+        confirmedWords = []
+        confirmed = ""
+        volatile = ""
+        isStreaming = true
+        loop = Task { @MainActor [weak self] in await self?.runLoop() }
+    }
+
+    func append(samples16k newSamples: [Float]) {
+        guard isStreaming, !newSamples.isEmpty else { return }
+        samples.append(contentsOf: newSamples)
+    }
+
+    func finish() async -> String {
+        isStreaming = false
+        loop?.cancel()
+        loop = nil
+        guard let manager, samples.count >= minSamples else {
+            let fallback = combined()
+            reset()
+            return fallback
+        }
+        var state = TdtDecoderState.make(decoderLayers: decoderLayers)
+        let finalText = (try? await manager.transcribe(samples, decoderState: &state, language: language))?
+            .text ?? combined()
+        reset()
+        return finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func cancel() {
+        isStreaming = false
+        loop?.cancel()
+        loop = nil
+        reset()
+    }
+
+    // MARK: - Inference loop
+
+    private func runLoop() async {
+        guard let manager else { return }
+        decoderLayers = await manager.decoderLayerCount
+        while isStreaming {
+            let snapshot = samples
+            if snapshot.count >= minSamples {
+                var state = TdtDecoderState.make(decoderLayers: decoderLayers)
+                if let result = try? await manager.transcribe(
+                    snapshot, decoderState: &state, language: language) {
+                    applyLocalAgreement(to: result.text)
+                }
+            }
+            // Space passes proportionally to buffer length so CPU stays bounded.
+            let seconds = Double(max(snapshot.count, minSamples)) / Double(sampleRate)
+            let intervalMs = max(baseIntervalMs, Int(seconds * Double(intervalPerSecondMs)))
+            try? await Task.sleep(for: .milliseconds(intervalMs))
+        }
+    }
+
+    /// LocalAgreement-2: extend the committed prefix to the longest word-prefix the
+    /// last two hypotheses agree on; everything after is volatile.
+    private func applyLocalAgreement(to text: String) {
+        let curr = Self.words(text)
+
+        var agree = 0
+        let bound = min(prevWords.count, curr.count)
+        while agree < bound, prevWords[agree].lowercased() == curr[agree].lowercased() {
+            agree += 1
+        }
+
+        // Grow the committed prefix only, and only when consistent with what's
+        // already committed (so confirmed text never changes or shrinks).
+        if agree > confirmedWords.count {
+            let candidate = Array(curr.prefix(agree))
+            if confirmedWords.isEmpty || candidate.starts(with: confirmedWords) {
+                confirmedWords = candidate
+            }
+        }
+
+        let committedCount = confirmedWords.count
+        confirmed = confirmedWords.joined(separator: " ")
+        volatile = curr.count > committedCount
+            ? curr[committedCount...].joined(separator: " ")
+            : ""
+        prevWords = curr
+        onUpdate?(confirmed, volatile)
+    }
+
+    // MARK: - Helpers
+
+    private func combined() -> String {
+        [confirmed, volatile]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func reset() {
+        samples = []
+        prevWords = []
+        confirmedWords = []
+        manager = nil
+        confirmed = ""
+        volatile = ""
+    }
+
+    static func words(_ text: String) -> [String] {
+        text.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).map(String.init)
+    }
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Relay entitlements.
+
+  This app is intentionally NOT sandboxed. It posts synthetic keyboard events
+  system-wide (CGEvent) and reads the global focused UI element (Accessibility
+  API) to inject dictated text into whatever app the user is typing in. The App
+  Sandbox forbids both, so `com.apple.security.app-sandbox` must be false.
+
+  Hardened Runtime is also off for now (ENABLE_HARDENED_RUNTIME = NO in
+  project.yml). When moving to Developer ID + notarization later, enable the
+  hardened runtime and add the appropriate exceptions; do NOT add the sandbox.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>
