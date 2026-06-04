@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The four areas of the configuration window.
 enum ConfigSection: String, CaseIterable, Identifiable, Hashable {
-    case microphone, shortcut, model, inputMethod, history, stats, general
+    case microphone, shortcut, model, formatting, inputMethod, history, stats, general
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ enum ConfigSection: String, CaseIterable, Identifiable, Hashable {
         case .microphone: return "Microphone"
         case .shortcut: return "Shortcut"
         case .model: return "Model"
+        case .formatting: return "Formatting"
         case .inputMethod: return "Input Method"
         case .history: return "History"
         case .stats: return "Stats"
@@ -23,6 +24,7 @@ enum ConfigSection: String, CaseIterable, Identifiable, Hashable {
         case .microphone: return "mic"
         case .shortcut: return "keyboard"
         case .model: return "waveform"
+        case .formatting: return "textformat"
         case .inputMethod: return "text.cursor"
         case .history: return "clock"
         case .stats: return "chart.bar"
@@ -47,6 +49,7 @@ struct ConfigView: View {
             case .microphone: MicrophoneSection()
             case .shortcut: KeybindSection()
             case .model: ModelStatusSection()
+            case .formatting: FormattingSection()
             case .inputMethod: InputMethodSection()
             case .history: HistorySection()
             case .stats: StatsSection()
