@@ -30,6 +30,10 @@ final class AppSettings {
     /// How long to keep the mic warm after a dictation so the next one starts
     /// instantly (no cold-start clipping the first word). See `MicKeepAlive`.
     var micKeepAlive: MicKeepAlive
+    /// Inverse Text Normalization (spoken→written numbers). Toggleable; default off.
+    var enableITN: Bool
+    /// User-defined find→replace rules, always applied (per-rule enable inside).
+    var replacements: [TextReplacementRule]
 
     /// The exact subset written to disk.
     private struct Snapshot: Codable {
@@ -42,6 +46,10 @@ final class AppSettings {
         var imkEnabled: Bool?                  // added later; nil in old files → false
         var imkEngagementMode: IMKEngagementMode?  // added later; nil in old files → .alwaysOn
         var micKeepAlive: MicKeepAlive?        // added later; nil in old files → .seconds30
+        // Optional for backward compatibility with settings.json written before
+        // these existed (a missing key must not fail the whole decode).
+        var enableITN: Bool?
+        var replacements: [TextReplacementRule]?
     }
 
     init() {
@@ -55,6 +63,8 @@ final class AppSettings {
             imkEnabled = snap.imkEnabled ?? false
             imkEngagementMode = snap.imkEngagementMode ?? .alwaysOn
             micKeepAlive = snap.micKeepAlive ?? .seconds30
+            enableITN = snap.enableITN ?? false
+            replacements = snap.replacements ?? []
         } else {
             micPriority = []
             keybind = .rightCommand
@@ -65,6 +75,8 @@ final class AppSettings {
             imkEnabled = false
             imkEngagementMode = .alwaysOn
             micKeepAlive = .seconds30
+            enableITN = false
+            replacements = []
         }
     }
 
@@ -103,7 +115,9 @@ final class AppSettings {
             insertionMode: insertionMode,
             imkEnabled: imkEnabled,
             imkEngagementMode: imkEngagementMode,
-            micKeepAlive: micKeepAlive
+            micKeepAlive: micKeepAlive,
+            enableITN: enableITN,
+            replacements: replacements
         )
         do {
             let encoder = JSONEncoder()
