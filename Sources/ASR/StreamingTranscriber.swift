@@ -166,7 +166,8 @@ final class StreamingTranscriber {
         accepting = false
     }
 
-    static func words(_ text: String) -> [String] {
-        text.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).map(String.init)
-    }
+    /// Word split used for LocalAgreement. Delegates to the shared `WordCount`
+    /// helper so the streaming definition and the stats word count stay identical.
+    /// `nonisolated` (pure) so off-main callers and tests can use it directly.
+    nonisolated static func words(_ text: String) -> [String] { WordCount.words(text) }
 }

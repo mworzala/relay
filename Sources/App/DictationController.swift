@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Observation
 import FluidAudio
@@ -31,6 +32,14 @@ final class DictationController {
     private let armDelayMs = 120
 
     private var armTask: Task<Void, Never>?
+
+    /// Stats captured at session start (where the text lands and when it began),
+    /// read back at `finish()`. The pill is a `NonActivatingPanel`, so the target
+    /// app stays frontmost while the user holds to talk — capturing at *start* is
+    /// the authoritative target, independent of the overlay's own timer.
+    @ObservationIgnored private var sessionStart: Date?
+    @ObservationIgnored private var sessionAppBundleID: String?
+    @ObservationIgnored private var sessionAppName: String?
 
     /// Hooks for later milestones (injection, overlay). Set by the app wiring.
     @ObservationIgnored var onSessionStart: (() -> Void)?
@@ -114,6 +123,15 @@ final class DictationController {
     private func beginDictation() {
         guard let manager = asr.asrManager else { cancelArming(); return }
         phase = .listening
+
+        // Capture the target app + start time before injection begins. The
+        // frontmost app is where the dictation will land (the pill never steals
+        // focus); the coordinator resolves the same app on its own queue.
+        sessionStart = Date()
+        let targetApp = NSWorkspace.shared.frontmostApplication
+        sessionAppBundleID = targetApp?.bundleIdentifier
+        sessionAppName = targetApp?.localizedName
+
         injector.beginSession()
 
         streaming.onUpdate = { [weak self] confirmed, volatile in
@@ -153,8 +171,18 @@ final class DictationController {
         let finalText = await streaming.finish()
         injector.finalize(finalText)
         if !finalText.isEmpty {
-            HistoryStore.add(finalText)
+            // Hold duration = start of dictation → now; the natural WPM denominator.
+            let duration = sessionStart.map { Date().timeIntervalSince($0) } ?? 0
+            HistoryStore.add(
+                finalText,
+                appBundleID: sessionAppBundleID,
+                appName: sessionAppName,
+                durationSeconds: duration
+            )
         }
+        sessionStart = nil
+        sessionAppBundleID = nil
+        sessionAppName = nil
         onSessionFinish?(finalText)
         phase = .idle
     }

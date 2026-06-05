@@ -98,44 +98,53 @@ nonisolated final class AXTextInjector: TextInjecting, @unchecked Sendable {
         // Region to replace: the initial selection on the first write, our tracked
         // inserted text thereafter.
         let regionLength = firstWrite ? initialSelection : insertedLength
-        // Snapshot the field's content before the FIRST write so we can verify it
-        // actually changed — Chromium reports attributes settable yet ignores some
-        // writes, and its length count is frozen, so we compare CONTENT not length.
-        let before = firstWrite ? AXText.value(of: element) : nil
+        // Snapshot the value before the first selectedText write so we can tell if
+        // the field actually applied it (native) or ignored it (Chromium/Electron).
+        let valueBefore = (firstWrite && writeMode == .selectedText) ? AXText.value(of: element) : nil
 
         var ok = write(target, regionLength: regionLength, mode: writeMode, element: element)
 
-        // If the first write didn't change the field, try the other write path once.
-        if ok, firstWrite, !Self.changed(from: before, element: element) {
-            if writeMode == .selectedText, AXText.isSettable(element, kAXValueAttribute as String) {
-                trace("selectedText write was inert — retrying via value")
-                writeMode = .value
-                ok = write(target, regionLength: regionLength, mode: .value, element: element)
-                    && Self.changed(from: before, element: element)
-            } else {
-                ok = false
-            }
+        // First selectedText write that changed nothing → Chromium/Electron (inert
+        // selected-text). Switch to the value path and TRUST it: Chromium *applies*
+        // setValue, but its reads are unreliable (it can report a frozen length and
+        // its placeholder as the value), so re-verifying would falsely conclude
+        // "inert" and double-insert via the keystroke fallback.
+        if ok, firstWrite, writeMode == .selectedText,
+           !Self.changed(from: valueBefore, element: element),
+           AXText.isSettable(element, kAXValueAttribute as String) {
+            trace("selectedText inert — switching to value mode")
+            writeMode = .value
+            ok = write(target, regionLength: regionLength, mode: .value, element: element)
         }
 
         if ok {
             // Cursor ALWAYS visibly at the end of what we inserted.
             let end = insertionStart + target.utf16.count
             AXText.setSelectedRange(element, NSRange(location: end, length: 0))
+            // Chromium's contenteditable rebuilds its DOM on setValue, collapsing
+            // the caret to 0, and ignores AX selection writes (kAXSelectedTextRange).
+            // It DOES honor real keystrokes, so on the final write repair the caret
+            // with ⌘A→→ once the async DOM rebuild settles. (Native fields use
+            // selectedText mode and are already positioned by the line above.)
+            if final, writeMode == .value {
+                queue.asyncAfter(deadline: .now() + 0.15) {
+                    SyntheticKeys.moveCaretToEnd()
+                }
+            }
             insertedLength = target.utf16.count
             lastWritten = target
             trace("\(writeMode.rawValue) wrote len=\(target.utf16.count) region=\(regionLength)\(final ? " (final)" : "")")
             report?("wrote \(target.utf16.count)")
         } else {
-            // Inert or failed. On the first write nothing is on screen yet, so hand
-            // off to the keystroke fallback (which works everywhere, incl. Chromium).
+            // The AX call returned an error. On the first write nothing is on screen
+            // yet → hand off to the keystroke fallback (works everywhere).
             active = false
             if firstWrite {
-                // A failed value-write can move the caret (Chromium resets the
-                // selection on setValue). Restore it so the keystroke fallback
-                // appends at the right place instead of prepending at 0.
+                // Restore the caret (a failed setValue can reset Chromium's selection
+                // to 0) so the keystroke fallback appends instead of prepending.
                 AXText.setSelectedRange(element, NSRange(location: insertionStart, length: 0))
-                trace("AX write inert — falling back to keystrokes")
-                report?("axInert")
+                trace("AX write failed — falling back to keystrokes")
+                report?("axFailed")
                 fallback?()
             } else {
                 trace("AX write failed — stopping AX")
@@ -145,7 +154,7 @@ nonisolated final class AXTextInjector: TextInjecting, @unchecked Sendable {
     }
 
     /// Perform one write in the given mode. Returns whether the AX call reported
-    /// success (not whether it visibly took effect — see `tookEffect`).
+    /// success (not whether the read-back reflects it — Chromium reads lie).
     private func write(_ target: String, regionLength: Int, mode: WriteMode, element: AXUIElement) -> Bool {
         switch mode {
         case .selectedText:
@@ -156,16 +165,28 @@ nonisolated final class AXTextInjector: TextInjecting, @unchecked Sendable {
             if edit.range.length == 0 && edit.replacement.isEmpty { return true }   // already matches
             return AXText.replace(element, range: edit.range, with: edit.replacement)
         case .value:
-            guard let value = AXText.value(of: element) else { return false }
-            let newValue = AXText.splicedValue(
-                value, insertionStart: insertionStart, regionLength: regionLength, target: target)
+            // At the very start of the field, replace the whole value with the
+            // dictation. We deliberately do NOT read the existing value here:
+            // Chromium reports its placeholder ("Write a message…") as the value
+            // while empty, and splicing into that would inject the placeholder.
+            // Mid-field (caret > 0, real content present) we splice to preserve the
+            // surrounding text.
+            let newValue: String
+            if insertionStart == 0 {
+                newValue = target
+            } else if let value = AXText.value(of: element) {
+                newValue = AXText.splicedValue(
+                    value, insertionStart: insertionStart, regionLength: regionLength, target: target)
+            } else {
+                return false
+            }
             return AXText.setValue(element, newValue)
         }
     }
 
-    /// Whether the field's content actually changed after a write. Compares the
-    /// full value (not the length count, which Chromium freezes). A nil `before`
-    /// snapshot (couldn't read) → assume success rather than falsely fall back.
+    /// Whether the field's content actually changed after a write (used only to
+    /// detect inert selected-text on the first write). Compares the full value, not
+    /// the length count (which Chromium freezes). A nil `before` → assume changed.
     private static func changed(from before: String?, element: AXUIElement) -> Bool {
         guard let before else { return true }
         return AXText.value(of: element) != before

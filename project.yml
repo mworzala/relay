@@ -111,6 +111,7 @@ targets:
     sources:
       - path: Sources/Probe
       - path: Sources/Shared/AppPaths.swift
+      - path: Sources/Shared/WordCount.swift   # shared word-split used by StreamingTranscriber
       - path: Sources/ASR/ParakeetModel.swift
       - path: Sources/ASR/StreamingTranscriber.swift
       - path: Sources/Audio/AudioInputDevice.swift

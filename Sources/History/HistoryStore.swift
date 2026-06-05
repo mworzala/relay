@@ -15,11 +15,25 @@ enum HistoryStore {
         }
     }()
 
-    /// Insert a finalized transcription and persist immediately.
+    /// Insert a finalized transcription and persist immediately. The stats fields
+    /// default so existing callers (and the manual-add test field) stay valid; the
+    /// dictation pipeline passes the resolved target app and hold duration.
     @MainActor
-    static func add(_ text: String, timestamp: Date = .now) {
+    static func add(
+        _ text: String,
+        timestamp: Date = .now,
+        appBundleID: String? = nil,
+        appName: String? = nil,
+        durationSeconds: Double = 0
+    ) {
         let context = container.mainContext
-        context.insert(Transcription(text: text, timestamp: timestamp))
+        context.insert(Transcription(
+            text: text,
+            timestamp: timestamp,
+            appBundleID: appBundleID,
+            appName: appName,
+            durationSeconds: durationSeconds
+        ))
         try? context.save()
     }
 }
