@@ -13,17 +13,21 @@ final class AppModel {
     let mic: MicrophoneCapture
     let dictation: DictationController
     let overlay: OverlayController
+    /// Caret-anchored live-transcript box for "Overlay + paste" mode.
+    let transcriptOverlay: TranscriptOverlayController
 
     init() {
         let settings = AppSettings()
         let asr = ASREngine()
         let mic = MicrophoneCapture()
         let overlay = OverlayController()
+        let transcriptOverlay = TranscriptOverlayController()
 
         self.settings = settings
         self.asr = asr
         self.mic = mic
         self.overlay = overlay
+        self.transcriptOverlay = transcriptOverlay
 
         // Injection: AX-primary coordinator with keystroke fallback. Under
         // RELAY_DEBUG the coordinator publishes each session's decision/op to the
@@ -33,15 +37,24 @@ final class AppModel {
             ? { @Sendable info in _ = Task { @MainActor in diagnostics.applyInjection(info) } }
             : nil
         let injector = InjectionCoordinator(debugSink: debugSink)
-        self.dictation = DictationController(settings: settings, mic: mic, asr: asr, injector: injector)
+        let paste = PasteInjector()
+        self.dictation = DictationController(
+            settings: settings, mic: mic, asr: asr, injector: injector, paste: paste)
 
         mic.priorityProvider = { [settings] in settings.micPriority }
 
-        // Wire the dictation lifecycle to the floating pill.
+        // Wire the dictation lifecycle to the floating pill (shown in both modes).
         overlay.levelSource = { [mic] in mic.level }
         overlay.micNameSource = { [mic] in mic.activeDevice?.name }
         dictation.onSessionStart = { [overlay] in overlay.show() }
         dictation.onSessionFinish = { [overlay] _ in overlay.hide() }
+
+        // Wire the "Overlay + paste" transcript box.
+        dictation.onTranscriptBegin = { [transcriptOverlay] in transcriptOverlay.begin() }
+        dictation.onTranscriptUpdate = { [transcriptOverlay] confirmed, volatile in
+            transcriptOverlay.update(confirmed: confirmed, volatile: volatile)
+        }
+        dictation.onTranscriptEnd = { [transcriptOverlay] in transcriptOverlay.end() }
     }
 
     /// Bring the app fully online: device monitoring, hotkey, and (if the model is

@@ -32,4 +32,12 @@ nonisolated enum SyntheticKeys {
         post(CGKeyCode(kVK_ANSI_A), flags: .maskCommand)
         post(CGKeyCode(kVK_RightArrow))
     }
+
+    /// Paste the current clipboard contents at the caret: ⌘V. Routes through the
+    /// app's native edit pipeline, so the caret lands after the inserted text and a
+    /// single undo reverts it — the basis of "Overlay + paste" insertion. The flag
+    /// is set explicitly so a still-held hold-to-talk modifier can't leak in.
+    static func paste() {
+        post(CGKeyCode(kVK_ANSI_V), flags: .maskCommand)
+    }
 }

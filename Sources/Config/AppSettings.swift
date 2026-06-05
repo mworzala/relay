@@ -18,6 +18,9 @@ final class AppSettings {
     /// may briefly rewrite/backspace). Off = inject only the committed prefix
     /// (smooth, append-only, slightly delayed). Default on.
     var injectUnconfirmedText: Bool
+    /// Whether dictation types directly into the field (default) or streams into a
+    /// caret-anchored overlay and pastes on release. See `InsertionMode`.
+    var insertionMode: InsertionMode
 
     /// The exact subset written to disk.
     private struct Snapshot: Codable {
@@ -26,6 +29,7 @@ final class AppSettings {
         var launchAtLogin: Bool
         var firstRunComplete: Bool
         var injectUnconfirmedText: Bool?   // added later; nil in old files → default on
+        var insertionMode: InsertionMode?  // added later; nil in old files → .typeDirectly
     }
 
     init() {
@@ -36,12 +40,14 @@ final class AppSettings {
             launchAtLogin = snap.launchAtLogin
             firstRunComplete = snap.firstRunComplete
             injectUnconfirmedText = snap.injectUnconfirmedText ?? true
+            insertionMode = snap.insertionMode ?? .typeDirectly
         } else {
             micPriority = []
             keybind = .rightCommand
             launchAtLogin = false
             firstRunComplete = false
             injectUnconfirmedText = true
+            insertionMode = .typeDirectly
         }
     }
 
@@ -53,7 +59,8 @@ final class AppSettings {
             keybind: keybind,
             launchAtLogin: launchAtLogin,
             firstRunComplete: firstRunComplete,
-            injectUnconfirmedText: injectUnconfirmedText
+            injectUnconfirmedText: injectUnconfirmedText,
+            insertionMode: insertionMode
         )
         do {
             let encoder = JSONEncoder()

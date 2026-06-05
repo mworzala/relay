@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Carbon.HIToolbox
 import Observation
 import FluidAudio
 
@@ -25,7 +26,10 @@ final class DictationController {
     private let hotkey: HotkeyMonitor
     /// Picks AX (primary) vs keystrokes (fallback) per session and applies prefix
     /// unification; owned by `AppModel` so its debug info can reach the overlay.
+    /// Used by the `.typeDirectly` insertion mode.
     private let injector: InjectionCoordinator
+    /// Clipboard + ⌘V finalize for the `.overlayPaste` insertion mode.
+    private let paste: PasteInjector
 
     /// Hold this long before a press actually starts dictation, so quick taps /
     /// Right-Command combos don't trigger a session.
@@ -40,17 +44,27 @@ final class DictationController {
     @ObservationIgnored private var sessionStart: Date?
     @ObservationIgnored private var sessionAppBundleID: String?
     @ObservationIgnored private var sessionAppName: String?
+    /// Insertion mode resolved once at `beginDictation`, so toggling the setting
+    /// mid-dictation can't reconfigure a live session.
+    @ObservationIgnored private var sessionMode: InsertionMode = .typeDirectly
 
     /// Hooks for later milestones (injection, overlay). Set by the app wiring.
     @ObservationIgnored var onSessionStart: (() -> Void)?
     @ObservationIgnored var onHypothesis: (@MainActor (_ confirmed: String, _ volatile: String) -> Void)?
     @ObservationIgnored var onSessionFinish: (@MainActor (_ finalText: String) -> Void)?
+    /// Overlay-paste mode hooks (wired to `TranscriptOverlayController` by `AppModel`):
+    /// show the caret-anchored transcript box, feed it the live hypothesis, hide it.
+    @ObservationIgnored var onTranscriptBegin: (@MainActor () -> Void)?
+    @ObservationIgnored var onTranscriptUpdate: (@MainActor (_ confirmed: String, _ volatile: String) -> Void)?
+    @ObservationIgnored var onTranscriptEnd: (@MainActor () -> Void)?
 
-    init(settings: AppSettings, mic: MicrophoneCapture, asr: ASREngine, injector: InjectionCoordinator) {
+    init(settings: AppSettings, mic: MicrophoneCapture, asr: ASREngine,
+         injector: InjectionCoordinator, paste: PasteInjector) {
         self.settings = settings
         self.mic = mic
         self.asr = asr
         self.injector = injector
+        self.paste = paste
         self.hotkey = HotkeyMonitor(keybind: settings.keybind)
     }
 
@@ -132,19 +146,44 @@ final class DictationController {
         sessionAppBundleID = targetApp?.bundleIdentifier
         sessionAppName = targetApp?.localizedName
 
-        injector.beginSession()
+        // Snapshot the insertion mode once for this session (toggling mid-dictation
+        // mustn't reconfigure a live session). Secure input, by contrast, is checked
+        // *live* below — it can turn on mid-session as focus moves into a password
+        // field, and we must never mirror a password into the overlay.
+        sessionMode = settings.insertionMode
+
+        switch sessionMode {
+        case .typeDirectly:
+            injector.beginSession()
+        case .overlayPaste:
+            // Don't touch the field while streaming — the transcript lives in the
+            // overlay and lands via paste on release.
+            if !IsSecureEventInputEnabled() { onTranscriptBegin?() }
+        }
 
         streaming.onUpdate = { [weak self] confirmed, volatile in
             guard let self else { return }
-            // With "live unconfirmed text" on (default), inject confirmed + the
-            // volatile tail — responsive, but the tail may rewrite/backspace as it
-            // settles. Off injects only the committed prefix: it grows monotonically,
-            // so the field appends smoothly and never backspace-storms (the tail
-            // lands from the authoritative final pass on release).
-            let target = self.settings.injectUnconfirmedText
-                ? Self.joined(confirmed, volatile)
-                : confirmed
-            self.injector.render(target)
+            switch self.sessionMode {
+            case .typeDirectly:
+                // With "live unconfirmed text" on (default), inject confirmed + the
+                // volatile tail — responsive, but the tail may rewrite/backspace as
+                // it settles. Off injects only the committed prefix: it grows
+                // monotonically, so the field appends smoothly and never
+                // backspace-storms (the tail lands from the final pass on release).
+                let target = self.settings.injectUnconfirmedText
+                    ? Self.joined(confirmed, volatile)
+                    : confirmed
+                self.injector.render(target)
+            case .overlayPaste:
+                // Re-check secure input every update: if it turned on mid-session
+                // (focus moved into a password field), stop mirroring and hide the
+                // overlay rather than display the dictated password.
+                if IsSecureEventInputEnabled() {
+                    self.onTranscriptEnd?()
+                } else {
+                    self.onTranscriptUpdate?(confirmed, volatile)
+                }
+            }
             self.onHypothesis?(confirmed, volatile)
         }
         // The mic has been capturing since key-down (handlePress) into the streaming
@@ -169,7 +208,16 @@ final class DictationController {
         // Authoritative full-buffer pass, then reconcile the on-screen text to it
         // (fixes any tail the streaming passes left wrong) and save to history.
         let finalText = await streaming.finish()
-        injector.finalize(finalText)
+        switch sessionMode {
+        case .typeDirectly:
+            injector.finalize(finalText)
+        case .overlayPaste:
+            // Paste the final text at the user's real caret (the field was never
+            // touched), then dismiss the overlay. PasteInjector no-ops under secure
+            // input and on empty text.
+            paste.paste(finalText)
+            onTranscriptEnd?()
+        }
         if !finalText.isEmpty {
             // Hold duration = start of dictation → now; the natural WPM denominator.
             let duration = sessionStart.map { Date().timeIntervalSince($0) } ?? 0
