@@ -12,15 +12,30 @@ nonisolated enum SyntheticKeys {
     // Immutable after creation; CGEvent posting is thread-safe.
     nonisolated(unsafe) private static let source = CGEventSource(stateID: .hidSystemState)
 
+    /// A fixed magic constant stamped into the `eventSourceUserData` field of every
+    /// synthetic CGEvent Relay posts, so input observers can recognize Relay's own
+    /// events (its ⌘V / caret-repair keystrokes) and decline to react to them.
+    /// **Best-effort:** some event paths drop user-data fields, so this is a guard
+    /// only — never rely on it for correctness. ('RLY' + 0x01.)
+    static let sentinel: Int64 = 0x52_4C_59_01
+
+    /// Whether `event` carries Relay's self-event sentinel.
+    static func isRelaySynthetic(_ event: CGEvent) -> Bool {
+        event.getIntegerValueField(.eventSourceUserData) == sentinel
+    }
+
     /// Post a key down+up with explicit modifier flags. Flags are set explicitly
     /// (never inherited), so a still-held hold-to-talk modifier can't leak in —
-    /// though caret repair runs at finalize, after the key is released.
+    /// though caret repair runs at finalize, after the key is released. Both events
+    /// are stamped with `sentinel` so Relay can ignore its own keystrokes.
     static func post(_ keyCode: CGKeyCode, flags: CGEventFlags = []) {
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         else { return }
         down.flags = flags
         up.flags = flags
+        down.setIntegerValueField(.eventSourceUserData, value: sentinel)
+        up.setIntegerValueField(.eventSourceUserData, value: sentinel)
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
     }

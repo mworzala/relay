@@ -48,6 +48,13 @@ final class HotkeyMonitor {
     }
 
     private func handle(_ event: NSEvent) {
+        // Ignore Relay's own synthetic keystrokes (⌘V / caret repair) so it never
+        // reacts to events it posted itself. The hold-to-talk matcher already filters
+        // by key, so there's no misfire today; this is a defensive guard that keeps
+        // future key-watching robust. Best-effort — some event paths drop the
+        // user-data field (`cgEvent` may also be nil for non-CG events).
+        if let cgEvent = event.cgEvent, SyntheticKeys.isRelaySynthetic(cgEvent) { return }
+
         let transition: HotkeyMatcher.Transition?
         switch event.type {
         case .flagsChanged:
