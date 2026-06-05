@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import AVFoundation
 import Foundation
 import FluidAudio
@@ -257,7 +258,40 @@ case "hotkey-test":
     print(ok ? "HOTKEY-TEST: PASS" : "HOTKEY-TEST: FAIL")
     exit(ok ? 0 : 1)
 
+case "ax-dump":
+    // Inspect the system-focused element's AX text support: app identity, value
+    // length, selection range, and settability — a headless way to see whether a
+    // given app will get AX injection or the keystroke fallback. Read-only; never
+    // writes. Requires Accessibility permission, and a bare CLI is usually NOT a
+    // trusted AX client, so this commonly reports "no element". Run the GUI app's
+    // probe path for real per-app inspection.
+    guard AXIsProcessTrusted() else {
+        print("ax-dump: this process is NOT trusted for Accessibility.")
+        print("  Grant it in System Settings ▸ Privacy & Security ▸ Accessibility")
+        print("  (CLIs generally can't be trusted; use the app for live testing).")
+        exit(1)
+    }
+    guard let element = AXFocus.focusedElement() else {
+        print("ax-dump: no system-focused element (nothing focused, or not permitted).")
+        exit(1)
+    }
+    AXText.setTimeout(element)
+    let id = AXText.appIdentity(of: element)
+    let value = AXText.value(of: element)
+    let count = AXText.characterCount(of: element)
+    let sel = AXText.selectedRange(of: element)
+    let settableSelText = AXText.isSettable(element, kAXSelectedTextAttribute as String)
+    let settableValue = AXText.isSettable(element, kAXValueAttribute as String)
+    let supports = AXText.supportsTextEditing(element)
+    print("ax-dump:")
+    print("  app:           \(id.name ?? "—")  [\(id.bundleID ?? "?")]  pid=\(id.pid)")
+    print("  value length:  \(value?.utf16.count.description ?? count?.description ?? "—") (UTF-16)")
+    print("  selection:     \(sel.map { "loc=\($0.location) len=\($0.length)" } ?? "—")")
+    print("  settable:      selectedText=\(settableSelText) value=\(settableValue)")
+    print("  AX-injectable: \(supports ? "YES (would use AX mode)" : "no (keystroke fallback)")")
+    exit(0)
+
 default:
-    errLine("usage: relay-asr-probe <transcribe <file> | stream-file <file> [--realtime] | list-devices | meter-file <file> | hotkey-test>")
+    errLine("usage: relay-asr-probe <transcribe <file> | stream-file <file> [--realtime] | list-devices | meter-file <file> | hotkey-test | ax-dump>")
     exit(2)
 }

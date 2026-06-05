@@ -76,6 +76,30 @@ targets:
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/../Frameworks"
+    # A shared "Relay" scheme whose Test action runs the unit tests, so
+    # `xcodebuild test -scheme Relay` (make test) works.
+    scheme:
+      testTargets:
+        - RelayTests
+      gatherCoverageData: false
+
+  # Unit tests for the pure logic (text diff, AX UTF-16 range math, prefix
+  # unification). Hosted by the Relay app so `@testable import Relay` can reach
+  # internal symbols; AppModel.activate() stays inert under XCTest.
+  RelayTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Relay
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.relay.Relay.Tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
 
   # Headless diagnostic: downloads Parakeet v3 into Relay's Application Support
   # Models dir and batch-transcribes a file. Used to prove the ASR pipeline
@@ -96,6 +120,7 @@ targets:
       - path: Sources/Config/Keybind.swift
       - path: Sources/Hotkey/HotkeyMatcher.swift
       - path: Sources/Injection/TextDiff.swift
+      - path: Sources/Injection/AXText.swift   # AX read/write primitives for `ax-dump`
     dependencies:
       - package: FluidAudio
         product: FluidAudio

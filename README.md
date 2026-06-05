@@ -155,7 +155,26 @@ make build                                  # builds the probe too
 ./build/Build/Products/Debug/relay-asr-probe stream-file path/to/audio.wav --realtime
 ./build/Build/Products/Debug/relay-asr-probe list-devices
 ./build/Build/Products/Debug/relay-asr-probe hotkey-test   # / inject-test / meter-file / capture-test
+./build/Build/Products/Debug/relay-asr-probe ax-dump       # focused element's AX text support
 ```
+
+### Debug mode (`RELAY_DEBUG`)
+
+```sh
+make debug-run         # runs the app with RELAY_DEBUG=1
+```
+
+`RELAY_DEBUG=1` turns on two things:
+
+- **Diagnostics strip** above the dictation pill showing the resolved target app,
+  the active injection mode (`ax` / `keystroke` / `secure`), whether the
+  Electron/Chromium manual-accessibility flip was needed, the caret-prefix length
+  (contents are never logged), the last injection op, and the active mic. The
+  strip is generic — new signals can be appended without changing the view. Hidden
+  in normal builds.
+- **Injector tracing** — each edit (`NSLog`) from the AX and keystroke injectors.
+
+`RELAY_DEBUG_INJECT=1` is the legacy flag for tracing only (no strip).
 
 ## Acceptance checklist
 

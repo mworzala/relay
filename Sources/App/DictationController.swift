@@ -22,7 +22,9 @@ final class DictationController {
     private let asr: ASREngine
     private let streaming = StreamingTranscriber()
     private let hotkey: HotkeyMonitor
-    private let injector = TextInjector()
+    /// Picks AX (primary) vs keystrokes (fallback) per session and applies prefix
+    /// unification; owned by `AppModel` so its debug info can reach the overlay.
+    private let injector: InjectionCoordinator
 
     /// Hold this long before a press actually starts dictation, so quick taps /
     /// Right-Command combos don't trigger a session.
@@ -35,10 +37,11 @@ final class DictationController {
     @ObservationIgnored var onHypothesis: (@MainActor (_ confirmed: String, _ volatile: String) -> Void)?
     @ObservationIgnored var onSessionFinish: (@MainActor (_ finalText: String) -> Void)?
 
-    init(settings: AppSettings, mic: MicrophoneCapture, asr: ASREngine) {
+    init(settings: AppSettings, mic: MicrophoneCapture, asr: ASREngine, injector: InjectionCoordinator) {
         self.settings = settings
         self.mic = mic
         self.asr = asr
+        self.injector = injector
         self.hotkey = HotkeyMonitor(keybind: settings.keybind)
     }
 
@@ -53,7 +56,11 @@ final class DictationController {
     func deactivate() {
         hotkey.stop()
         armTask?.cancel()
-        if phase == .listening { Task { await finish() } }
+        switch phase {
+        case .listening: Task { await finish() }
+        case .arming: cancelArming()   // mic was warmed on key-down
+        case .idle, .finishing: break
+        }
     }
 
     /// Tear down and re-arm the hotkey monitors — used after the wizard grants
@@ -75,6 +82,14 @@ final class DictationController {
             return
         }
         phase = .arming
+        // Warm the mic and start buffering audio immediately on key-down, so the
+        // hardware startup latency (~0.3–0.5s) overlaps the arm delay and the
+        // opening words aren't clipped. If this turns out to be a quick tap we tear
+        // it back down in handleRelease.
+        streaming.prepare()
+        mic.beginCapture { [weak self] samples in
+            Task { @MainActor in self?.streaming.append(samples16k: samples) }
+        }
         armTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(self?.armDelayMs ?? 120))
             guard let self, !Task.isCancelled, self.phase == .arming else { return }
@@ -86,7 +101,7 @@ final class DictationController {
         armTask?.cancel()
         switch phase {
         case .arming:
-            phase = .idle           // quick tap — never really started
+            cancelArming()          // quick tap — never really started
         case .listening:
             Task { await finish() }
         case .idle, .finishing:
@@ -97,24 +112,35 @@ final class DictationController {
     // MARK: - Session
 
     private func beginDictation() {
-        guard let manager = asr.asrManager else { phase = .idle; return }
+        guard let manager = asr.asrManager else { cancelArming(); return }
         phase = .listening
         injector.beginSession()
 
         streaming.onUpdate = { [weak self] confirmed, volatile in
             guard let self else { return }
-            // Type the live hypothesis into the focused field (only the changed
-            // tail is edited; see TextInjector / TextDiff).
-            self.injector.render(Self.targetText(confirmed: confirmed, volatile: volatile))
+            // With "live unconfirmed text" on (default), inject confirmed + the
+            // volatile tail — responsive, but the tail may rewrite/backspace as it
+            // settles. Off injects only the committed prefix: it grows monotonically,
+            // so the field appends smoothly and never backspace-storms (the tail
+            // lands from the authoritative final pass on release).
+            let target = self.settings.injectUnconfirmedText
+                ? Self.joined(confirmed, volatile)
+                : confirmed
+            self.injector.render(target)
             self.onHypothesis?(confirmed, volatile)
         }
+        // The mic has been capturing since key-down (handlePress) into the streaming
+        // pre-roll; start now begins inference over that buffer + the live audio.
         streaming.start(manager: manager)
         onSessionStart?()
+    }
 
-        mic.beginCapture { [weak self] samples in
-            // Capture queue: samples are already 16 kHz mono Float; hand to the loop.
-            Task { @MainActor in self?.streaming.append(samples16k: samples) }
-        }
+    /// Tear down a session that armed (warmed the mic) but never started listening —
+    /// a quick tap, a combo, or teardown during the arm window.
+    private func cancelArming() {
+        mic.endCapture()
+        streaming.cancel()
+        phase = .idle
     }
 
     private func finish() async {
@@ -133,8 +159,8 @@ final class DictationController {
         phase = .idle
     }
 
-    /// Build the full on-screen target from the committed prefix + volatile tail.
-    private static func targetText(confirmed: String, volatile: String) -> String {
+    /// Join the committed prefix and the volatile tail into the live target text.
+    private static func joined(_ confirmed: String, _ volatile: String) -> String {
         [confirmed, volatile]
             .filter { !$0.isEmpty }
             .joined(separator: " ")

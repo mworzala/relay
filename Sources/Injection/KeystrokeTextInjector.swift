@@ -4,9 +4,12 @@ import CoreGraphics
 import Foundation
 
 /// Injects dictated text into whatever field has keyboard focus by posting
-/// synthetic key events. Serialized on a private queue so overlapping hypotheses
-/// can't interleave; it remembers exactly what it has typed this session and only
-/// edits the diverging tail (see `TextDiff`).
+/// synthetic key events. This is the **fallback** strategy, used when the focused
+/// field does not support Accessibility text editing (`AXTextInjector` is primary).
+///
+/// Serialized on a private queue so overlapping hypotheses can't interleave; it
+/// remembers exactly what it has typed this session and only edits the diverging
+/// tail (see `TextDiff`).
 ///
 /// Posting uses `CGEvent` + `keyboardSetUnicodeString` (handles punctuation /
 /// Unicode without per-key mapping) to `.cghidEventTap`; Backspaces are discrete
@@ -15,7 +18,7 @@ import Foundation
 /// `nonisolated` + `@unchecked Sendable`: this type lives off the main actor and
 /// all mutable state is confined to `queue` (so it must NOT inherit the project's
 /// MainActor-by-default isolation).
-nonisolated final class TextInjector: @unchecked Sendable {
+nonisolated final class KeystrokeTextInjector: TextInjecting, @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.relay.text-injector")
     private let source = CGEventSource(stateID: .hidSystemState)
 
@@ -24,13 +27,16 @@ nonisolated final class TextInjector: @unchecked Sendable {
     // --- State, only touched on `queue` ---
     private var typed = ""
     private var sessionFocus: AXUIElement?
+    private var report: (@Sendable (String) -> Void)?
 
-    /// Begin a fresh dictation: forget prior text and snapshot the focused element
-    /// so we can detect if the user clicks elsewhere mid-dictation.
-    func beginSession() {
+    /// Begin a fresh dictation against a resolved context. The keystroke strategy
+    /// only needs the focused element (to detect a mid-session focus change) and
+    /// the optional debug reporter — it ignores the AX prefix/caret fields.
+    func beginSession(context: InjectionContext) {
         queue.async {
             self.typed = ""
-            self.sessionFocus = AXFocus.focusedElement()
+            self.sessionFocus = context.element ?? AXFocus.focusedElement()
+            self.report = context.report
         }
     }
 
@@ -44,19 +50,22 @@ nonisolated final class TextInjector: @unchecked Sendable {
         queue.async {
             self.applyRender(finalText)
             self.sessionFocus = nil
+            self.report = nil
         }
     }
 
     // MARK: - Implementation (on `queue`)
 
-    /// Opt-in injector tracing: run with `RELAY_DEBUG_INJECT=1` to log each edit.
-    private static let debugLogging = ProcessInfo.processInfo.environment["RELAY_DEBUG_INJECT"] == "1"
+    /// Opt-in injector tracing: see `RelayDebug.injectTracing` (`RELAY_DEBUG=1` or
+    /// the legacy `RELAY_DEBUG_INJECT=1`).
+    private static let debugLogging = RelayDebug.injectTracing
 
     private func applyRender(_ target: String) {
         // Password fields enable Secure Input, which blocks synthetic keystrokes.
         // Fail gracefully rather than silently fighting the OS.
         if IsSecureEventInputEnabled() {
             if Self.debugLogging { NSLog("Relay/inject: secure input active — skipping") }
+            report?("secure")
             typed = target   // keep our model consistent with intent
             return
         }
@@ -80,6 +89,7 @@ nonisolated final class TextInjector: @unchecked Sendable {
         postBackspaces(plan.backspaces)
         postString(plan.insert)
         typed = target
+        report?(focusMoved ? "focusMoved" : "typed \(plan.insert.count)")
     }
 
     /// Common-prefix length used when suppressing backspaces on a focus change.
@@ -129,19 +139,5 @@ nonisolated final class TextInjector: @unchecked Sendable {
         // ⌘+Delete (delete-to-line-start) that was wiping the user's text.
         event.flags = []
         event.post(tap: .cghidEventTap)
-    }
-}
-
-/// Reads the system-wide focused UI element via the Accessibility API.
-/// `nonisolated` so the injector can call it from its private serial queue.
-enum AXFocus {
-    nonisolated static func focusedElement() -> AXUIElement? {
-        let system = AXUIElementCreateSystemWide()
-        var value: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(
-            system, kAXFocusedUIElementAttribute as CFString, &value)
-        guard result == .success, let value else { return nil }
-        // The attribute value is an AXUIElement.
-        return (value as! AXUIElement)
     }
 }

@@ -34,16 +34,33 @@ final class StreamingTranscriber {
     @ObservationIgnored private var prevWords: [String] = []
     @ObservationIgnored private var confirmedWords: [String] = []   // strictly-growing committed prefix
 
+    /// True while buffering pre-roll audio captured on key-down, before `start`
+    /// begins the inference loop.
+    @ObservationIgnored private var accepting = false
+
     private let sampleRate = 16_000
-    private let minSamples = 8_000          // ~0.5s before first inference
-    private let baseIntervalMs = 280
+    private let minSamples = 4_800          // ~0.3s before first inference (lower = snappier)
+    private let baseIntervalMs = 140        // floor between passes (early updates feel live)
     /// Added per second of buffered audio: keeps (pass time)/(interval) bounded.
     private let intervalPerSecondMs = 60
+
+    /// Begin buffering mic samples **before** inference starts — called on key-down
+    /// so the mic hardware warms and the opening words are captured during the arm
+    /// delay. `start` then runs the loop over the already-buffered pre-roll.
+    func prepare() {
+        samples = []
+        prevWords = []
+        confirmedWords = []
+        confirmed = ""
+        volatile = ""
+        accepting = true
+    }
 
     func start(manager: AsrManager, language: Language? = nil) {
         self.manager = manager
         self.language = language
-        samples = []
+        if !accepting { samples = [] }   // keep any pre-roll captured during arming
+        accepting = false
         prevWords = []
         confirmedWords = []
         confirmed = ""
@@ -53,7 +70,7 @@ final class StreamingTranscriber {
     }
 
     func append(samples16k newSamples: [Float]) {
-        guard isStreaming, !newSamples.isEmpty else { return }
+        guard accepting || isStreaming, !newSamples.isEmpty else { return }
         samples.append(contentsOf: newSamples)
     }
 
@@ -146,6 +163,7 @@ final class StreamingTranscriber {
         manager = nil
         confirmed = ""
         volatile = ""
+        accepting = false
     }
 
     static func words(_ text: String) -> [String] {

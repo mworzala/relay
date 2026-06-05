@@ -14,14 +14,24 @@ final class OverlayController {
     private(set) var levels: [Float] = Array(repeating: 0, count: barCount)
     private(set) var elapsed: TimeInterval = 0
 
+    /// Debug-only diagnostics shown in a strip above the pill (gated on
+    /// `RelayDebug.overlayEnabled`). Generic field bag — see `OverlayDiagnostics`.
+    let diagnostics = OverlayDiagnostics()
+
     /// Supplies the current input level (0…1) — wired to the microphone meter.
     @ObservationIgnored var levelSource: (() -> Float)?
+    /// Supplies the active mic device name for the diagnostics strip.
+    @ObservationIgnored var micNameSource: (() -> String?)?
 
     @ObservationIgnored private var panel: NSPanel?
+    @ObservationIgnored private var diagnosticsPanel: NSPanel?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var startDate: Date?
 
     private static let panelSize = NSSize(width: 230, height: 60)
+    private static let diagnosticsSize = NSSize(width: 560, height: 30)
+    /// Gap between the top of the pill and the bottom of the diagnostics strip.
+    private static let diagnosticsGap: CGFloat = 6
 
     func show() {
         levels = Array(repeating: 0, count: Self.barCount)
@@ -29,13 +39,21 @@ final class OverlayController {
         startDate = Date()
         ensurePanel()
         positionPanel()
-        fadeIn()
+        fadeIn(panel)
+        if RelayDebug.overlayEnabled {
+            diagnostics.resetInjection()   // don't flash the previous session's app
+            diagnostics.micName = micNameSource?()
+            ensureDiagnosticsPanel()
+            positionDiagnosticsPanel()
+            fadeIn(diagnosticsPanel)
+        }
         startTimer()
     }
 
     func hide() {
         stopTimer()
-        fadeOut()
+        fadeOut(panel)
+        fadeOut(diagnosticsPanel)
     }
 
     // MARK: - Panel
@@ -88,7 +106,7 @@ final class OverlayController {
             ?? NSScreen.screens[0]
     }
 
-    private func fadeIn() {
+    private func fadeIn(_ panel: NSPanel?) {
         guard let panel else { return }
         panel.orderFrontRegardless()   // show without becoming key/active
         NSAnimationContext.runAnimationGroup { context in
@@ -97,7 +115,7 @@ final class OverlayController {
         }
     }
 
-    private func fadeOut() {
+    private func fadeOut(_ panel: NSPanel?) {
         guard let panel else { return }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.22
@@ -106,6 +124,47 @@ final class OverlayController {
             // Completion fires on the main thread; assert it for the isolation checker.
             MainActor.assumeIsolated { panel?.orderOut(nil) }
         })
+    }
+
+    // MARK: - Diagnostics strip (debug-only, above the pill)
+
+    private func ensureDiagnosticsPanel() {
+        guard diagnosticsPanel == nil else { return }
+        let panel = NonActivatingPanel(
+            contentRect: NSRect(origin: .zero, size: Self.diagnosticsSize),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        panel.alphaValue = 0
+
+        let host = NSHostingView(rootView: DiagnosticsStripView(diagnostics: diagnostics))
+        host.frame = NSRect(origin: .zero, size: Self.diagnosticsSize)
+        host.autoresizingMask = [.width, .height]
+        panel.contentView = host
+
+        diagnosticsPanel = panel
+    }
+
+    /// Center the strip horizontally and seat it just above the pill, so the pill's
+    /// own frame is untouched.
+    private func positionDiagnosticsPanel() {
+        guard let diagnosticsPanel, let panel else { return }
+        let pill = panel.frame
+        let size = diagnosticsPanel.frame.size
+        let origin = NSPoint(
+            x: pill.midX - size.width / 2,
+            y: pill.maxY + Self.diagnosticsGap
+        )
+        diagnosticsPanel.setFrameOrigin(origin)
     }
 
     // MARK: - Animation timer
@@ -131,5 +190,6 @@ final class OverlayController {
         next.append(level)
         levels = next
         if let startDate { elapsed = Date().timeIntervalSince(startDate) }
+        if RelayDebug.overlayEnabled { diagnostics.micName = micNameSource?() }
     }
 }

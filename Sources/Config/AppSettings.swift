@@ -14,6 +14,10 @@ final class AppSettings {
     var keybind: Keybind
     var launchAtLogin: Bool
     var firstRunComplete: Bool
+    /// Type low-confidence words live and correct them as you speak (responsive,
+    /// may briefly rewrite/backspace). Off = inject only the committed prefix
+    /// (smooth, append-only, slightly delayed). Default on.
+    var injectUnconfirmedText: Bool
 
     /// The exact subset written to disk.
     private struct Snapshot: Codable {
@@ -21,6 +25,7 @@ final class AppSettings {
         var keybind: Keybind
         var launchAtLogin: Bool
         var firstRunComplete: Bool
+        var injectUnconfirmedText: Bool?   // added later; nil in old files → default on
     }
 
     init() {
@@ -30,11 +35,13 @@ final class AppSettings {
             keybind = snap.keybind
             launchAtLogin = snap.launchAtLogin
             firstRunComplete = snap.firstRunComplete
+            injectUnconfirmedText = snap.injectUnconfirmedText ?? true
         } else {
             micPriority = []
             keybind = .rightCommand
             launchAtLogin = false
             firstRunComplete = false
+            injectUnconfirmedText = true
         }
     }
 
@@ -45,7 +52,8 @@ final class AppSettings {
             micPriority: micPriority,
             keybind: keybind,
             launchAtLogin: launchAtLogin,
-            firstRunComplete: firstRunComplete
+            firstRunComplete: firstRunComplete,
+            injectUnconfirmedText: injectUnconfirmedText
         )
         do {
             let encoder = JSONEncoder()
