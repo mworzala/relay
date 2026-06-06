@@ -115,6 +115,14 @@ final class DictationController {
     /// Re-read the keybind after the user changes it.
     func keybindChanged() { hotkey.setKeybind(settings.keybind) }
 
+    /// The microphone lost its device mid-dictation and couldn't reroute. New audio
+    /// has stopped; the session rides out on the already-buffered audio and finalizes
+    /// on release. Surface it so the dropout is at least diagnosable.
+    func captureLost() {
+        guard phase == .listening else { return }
+        NSLog("Relay: microphone capture lost mid-dictation; finalizing on release from buffered audio")
+    }
+
     // MARK: - Hotkey transitions
 
     private func handlePress() {

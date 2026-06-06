@@ -52,6 +52,7 @@ final class AppModel {
         AppModel.shared = self
         mic.priorityProvider = { [settings] in settings.micPriority }
         mic.keepAliveProvider = { [settings] in settings.micKeepAlive }
+        mic.onCaptureLost = { [dictation = self.dictation] in dictation.captureLost() }
 
         // Wire the dictation lifecycle to the floating pill (shown in both modes).
         overlay.levelSource = { [mic] in mic.level }

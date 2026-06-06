@@ -23,6 +23,10 @@ final class MicrophoneCapture {
     @ObservationIgnored var priorityProvider: () -> [MicPriorityEntry] = { [] }
     /// Supplies the current keep-alive policy (wired to AppSettings).
     @ObservationIgnored var keepAliveProvider: () -> MicKeepAlive = { .seconds30 }
+    /// Called on the main actor when a reroute/rebuild fails while a dictation is
+    /// actively capturing — capture has stopped with no live audio, so the owner can
+    /// react (today: log; a seam for future user-facing recovery).
+    @ObservationIgnored var onCaptureLost: (() -> Void)?
 
     @ObservationIgnored private var samplesSink: (@Sendable ([Float]) -> Void)?
     /// Pending "cool the warm session" task (cancelled when a new dictation starts).
@@ -122,8 +126,12 @@ final class MicrophoneCapture {
     private func handleDeviceChange() { rerouteIfDeviceChanged() }
 
     private func handleConfigChange() {
-        // Hardware format changed (often the active device vanished). Rebuild on the
-        // freshly-resolved device so capture (or the warm session) continues cleanly.
+        // Hardware format changed (often the active device vanished). The runtime
+        // error / interruption can arrive before the HAL device-list listener has
+        // refreshed connectedDevices, so re-enumerate FIRST — otherwise we'd resolve
+        // the active device from a stale pre-unplug snapshot and try to warm the dead
+        // UID. Rebuild on the freshly-resolved device.
+        monitor.refresh()
         let desired = monitor.activeDevice(for: priorityProvider())
         activeDevice = desired
         rebuild(to: desired)
@@ -149,7 +157,10 @@ final class MicrophoneCapture {
             NSLog("Relay: microphone now on \(device?.name ?? "default")")
         } catch {
             NSLog("Relay: reroute failed: \(error)")
-            if isCapturing { isCapturing = false }
+            if isCapturing {
+                isCapturing = false
+                onCaptureLost?()   // tell the owner the active dictation lost its audio
+            }
         }
     }
 }
