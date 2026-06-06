@@ -37,7 +37,7 @@ final class AudioCaptureEngine {
     @ObservationIgnored var onConfigurationChange: (() -> Void)?
 
     @ObservationIgnored private var session: AVCaptureSession?
-    @ObservationIgnored private var runtimeObserver: NSObjectProtocol?
+    @ObservationIgnored private var sessionObservers: [NSObjectProtocol] = []
     @ObservationIgnored private let sampleQueue = DispatchQueue(label: "com.relay.audio.capture")
     @ObservationIgnored private let delegate = SampleDelegate()
     /// The device the running session was built for, so `warm` can no-op when
@@ -85,11 +85,22 @@ final class AudioCaptureEngine {
         session.addOutput(output)
         session.commitConfiguration()
 
-        runtimeObserver = NotificationCenter.default.addObserver(
-            forName: .AVCaptureSessionRuntimeError, object: session, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onConfigurationChange?() }
-        }
+        // A runtime error (e.g. the active device was unplugged) or the *end* of an
+        // interruption (the device was seized by another client, then released) both
+        // warrant a reroute/rebuild. A WasInterrupted on its own can't recover yet, so
+        // just log it; InterruptionEnded drives the recovery.
+        let center = NotificationCenter.default
+        sessionObservers = [
+            center.addObserver(forName: .AVCaptureSessionRuntimeError, object: session, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onConfigurationChange?() }
+            },
+            center.addObserver(forName: .AVCaptureSessionInterruptionEnded, object: session, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onConfigurationChange?() }
+            },
+            center.addObserver(forName: .AVCaptureSessionWasInterrupted, object: session, queue: .main) { _ in
+                NSLog("Relay: capture session interrupted (awaiting InterruptionEnded to recover)")
+            },
+        ]
 
         self.session = session
         self.currentDeviceUID = deviceUID
@@ -130,10 +141,8 @@ final class AudioCaptureEngine {
     }
 
     private func teardownSession() {
-        if let runtimeObserver {
-            NotificationCenter.default.removeObserver(runtimeObserver)
-            self.runtimeObserver = nil
-        }
+        for observer in sessionObservers { NotificationCenter.default.removeObserver(observer) }
+        sessionObservers = []
         delegate.setHandlers(onSamples: nil, onLevel: nil)
         if let session {
             sampleQueue.async { session.stopRunning() }
