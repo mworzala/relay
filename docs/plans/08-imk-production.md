@@ -21,12 +21,22 @@ is unreliable. Specifically:
 
 - A **Settings toggle**: "Insert via input method (better Electron/Chromium support)" — **off by
   default**, experimental.
+- A **mode picker** (enabled only when the toggle is on) letting the user choose how the IME engages:
+  - **Always on** (recommended, **no flash**) — Relay's IME becomes the active input source while the
+    feature is enabled and passes through all normal typing; dictation is gated internally. No
+    per-dictation switch, no menu-bar flicker. Tradeoff: Relay is the full-time input source (the
+    input menu shows "Relay").
+  - **Just-in-time** — Relay's IME is selected only for the duration of each dictation, then the
+    previous source is restored. Relay is *not* your full-time input source, but each dictation
+    **start** shows a brief menu-bar flip (the switch-back is free). This flip is **unavoidable** —
+    see §2.
 - When the user enables it and the keyboard isn't installed yet, show a **"Set up…" button** that
   installs + registers + enables the bundled IME (with the consent prompt and any logout guidance).
-- **Relay manages the IMK server process itself** — launches it, keeps it alive during dictation,
-  terminates it when done/disabled. Nothing is installed until the user explicitly requests it.
-- During dictation: switch the input source to Relay's IME, stream ASR text in (interim as
-  marked/underlined text, finalized phrases committed), then switch the user's source back.
+- **Relay manages the IMK server process itself** — launches it, keeps it alive while engaged,
+  terminates it when the feature is disabled. Nothing is installed until the user explicitly requests
+  it.
+- During dictation: stream ASR text in (interim as marked/underlined text, finalized phrases
+  committed). The two modes differ only in *when* the IME is the active source (always vs per-dictation).
 - If the IME is not installed/enabled, **transparently fall back** to the existing AX/paste path.
 
 ## Why
@@ -197,11 +207,19 @@ flawless** (bundle-id-gate behavior Squirrel-style); secure/password fields reve
 bypass the IME (harmless); install is `~/Library/Input Methods/` so **Developer-ID/notarized only,
 never Mac App Store**.
 
-**Decision for implementation:** build **2b (persistent IME)** as the primary path — it directly
-solves the flash the user flagged and preserves the marked-text composition UX. Keep the §2
-focus-churn (`activate` mode) only as an opt-in "switch just-in-time" alternative for users who don't
-want Relay to be their full-time input source, and keep the existing **AX/paste path** as the
-non-IMK fallback. Isolate the engage step behind one swappable function regardless.
+**Decision for implementation:** ship **both engagement modes as a user-selectable config option**
+(see Goal + §5) — they share all the install/IPC/insertion machinery and differ only in *when* the
+IME is the active source:
+
+- **Always on (2b)** — default/recommended; flash-free; Relay is the full-time source. Engage once on
+  enable; no churn.
+- **Just-in-time (§2 focus-churn, `activate` mode)** — Relay isn't the full-time source, at the cost
+  of one menu-bar flip per dictation start.
+
+Implement the engage/disengage step behind **one swappable strategy** (`IMKEngagement` with
+`alwaysOn` / `justInTime` conformers) so the mode is a runtime switch, not two code paths. Keep the
+existing **AX/paste path** as the non-IMK fallback when the IME isn't installed/enabled or in secure
+fields.
 
 > Full research report (ranked options, exact call sequences, sources) is reproduced in the spike's
 > `docs/imk-spike-findings.md` on the spike branch; the load-bearing conclusions are inlined above so
@@ -278,14 +296,23 @@ non-IMK fallback. Isolate the engage step behind one swappable function regardle
 
 - Settings section (under the existing Config UI): a toggle **"Insert via input method (better
   Electron/Chromium support) — experimental"**, default **off**.
+- A **mode picker** (segmented control / radio), enabled only when the toggle is on. Persist the
+  choice (e.g. `imkEngagementMode: alwaysOn | justInTime`) in the app's config:
+  - **Always on (recommended)** — "Relay stays your active input source; no flicker." → `alwaysOn`.
+  - **Just-in-time** — "Switches only while dictating; brief menu-bar flash on start." → `justInTime`.
+  The selected mode drives which `IMKEngagement` strategy `IMKSwitcher` uses (§2b). Changing the mode
+  while enabled re-engages: `alwaysOn` selects the IME now; `justInTime` restores the user's source
+  and switches only per dictation.
 - State machine for the row:
-  - **Not installed** → toggle reveals a **"Set up…"** button. Tapping it runs `IMKInstaller`
-    (copy → register → enable), shows the consent prompt, and — if TIS doesn't list it yet — shows
-    "Log out and back in once to finish setup."
-  - **Installed + enabled** → toggle simply turns IME insertion on/off; Relay launches/terminates the
-    helper accordingly.
-  - **"Remove"** affordance → `uninstall` (disable source, remove the bundle from
-    `~/Library/Input Methods/`, terminate the helper) + note that a logout fully purges it.
+  - **Not installed** → toggle (or first mode selection) reveals a **"Set up…"** button. Tapping it
+    runs `IMKInstaller` (copy → register → enable), shows the consent prompt, and — if TIS doesn't
+    list it yet — shows "Log out and back in once to finish setup."
+  - **Installed + enabled** → toggle turns IME insertion on/off and the mode picker takes effect;
+    Relay launches/keeps-alive/terminates the helper accordingly. In `alwaysOn`, enabling selects the
+    IME as the active source; disabling restores the previous source.
+  - **"Remove"** affordance → `uninstall` (restore previous source if currently selected, disable the
+    source, remove the bundle from `~/Library/Input Methods/`, terminate the helper) + note that a
+    logout fully purges it.
 - Never install or register anything until the user taps **Set up**.
 
 ---
@@ -317,10 +344,13 @@ non-IMK fallback. Isolate the engage step behind one swappable function regardle
 
 - [ ] `RelayInputMethod.app` builds, embeds in `Relay.app`, and installs only on explicit user
       action; commits via `insertText:` and passes through keystrokes.
-- [ ] Settings toggle + "Set up…" flow (install/register/enable/consent/logout-guidance) and a remove
-      path.
+- [ ] Settings toggle + **mode picker (Always-on / Just-in-time)** + "Set up…" flow
+      (install/register/enable/consent/logout-guidance) and a remove path.
+- [ ] Both engagement modes work behind one swappable `IMKEngagement` strategy: **Always-on** engages
+      once with no flash; **Just-in-time** switches per dictation (brief menu-bar flip on start) and
+      restores the previous source. Changing the mode at runtime re-engages correctly.
 - [ ] Relay launches/keeps-alive/terminates the helper process itself; IPC streams marked/commit
       events from ASR to the helper.
-- [ ] Switch-on-dictation works end-to-end in at least one native and one Electron app, restoring the
-      previous source afterward; transparent fallback when not installed/enabled or in secure fields.
+- [ ] Dictation works end-to-end in at least one native and one Electron app in both modes;
+      transparent fallback when not installed/enabled or in secure fields.
 - [ ] All §3 gotchas honored; builds cleanly.
