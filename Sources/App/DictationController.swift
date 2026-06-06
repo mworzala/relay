@@ -274,7 +274,17 @@ final class DictationController {
             // the existing field content (the capture has long since completed).
             let unified = unifyForIMK(finalText)
             publishIMKDiagnostics(op: unified.isEmpty ? "clear" : "commit")
-            imk.finishDictationSession(finalText: unified)
+            let committed = imk.finishDictationSession(finalText: unified)
+            if !committed && !unified.isEmpty {
+                // The IME commit timed out / the helper was unresponsive, so the
+                // authoritative text never landed. Don't lose the dictation — the JIT
+                // source restore in finishDictationSession has put the user's normal
+                // input back, so paste the final text at the caret (no-ops under
+                // secure input and on empty text).
+                NSLog("Relay: IMK commit failed; falling back to paste injection")
+                publishIMKDiagnostics(op: "commit-fallback-paste")
+                paste.paste(unified)
+            }
         } else {
             switch sessionMode {
             case .typeDirectly:

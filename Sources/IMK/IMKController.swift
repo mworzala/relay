@@ -276,19 +276,32 @@ final class IMKController {
 
     /// Commit the authoritative final text (replaces the composition), then end the
     /// session. Empty text clears the composition instead of committing.
-    func finishDictationSession(finalText: String) {
-        guard sessionActive else { return }
+    ///
+    /// Returns whether the final text was actually applied: `true` on a successful
+    /// (acked) commit or an empty-text clear (nothing to lose); `false` when a
+    /// non-empty commit times out or the transport fails — the caller must then
+    /// inject `finalText` another way so the dictation is never silently lost.
+    @discardableResult
+    func finishDictationSession(finalText: String) -> Bool {
+        guard sessionActive else { return false }
+        var committed = true
         if finalText.isEmpty {
             ipc.post(.clear)
         } else {
             // Acked commit: block until the helper has applied insertText, so a
             // just-in-time source restore (in endDictation) can't deselect the IME
-            // before the final text lands and gets lost.
-            ipc.request(.commit, finalText, timeout: Self.commitTimeout)
+            // before the final text lands and gets lost. A nil reply means the helper
+            // is slow/dead and the text never landed — report failure so the caller
+            // can fall back.
+            committed = ipc.request(.commit, finalText, timeout: Self.commitTimeout) != nil
+            if !committed {
+                NSLog("Relay: IMK commit failed (helper unresponsive); caller will fall back")
+            }
         }
         strategy.endDictation(ipc: ipc, memory: memory)
         sessionActive = false
         applyPendingReengage()
+        return committed
     }
 
     /// Abort an open IMK session without committing (a safety hook for teardown
