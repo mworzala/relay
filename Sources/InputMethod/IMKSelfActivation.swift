@@ -18,7 +18,7 @@ nonisolated enum IMKSelfActivation {
             IMKLog.write("self: no TIS sources for our bundle yet")
             return
         }
-        let sources = (cf as NSArray).compactMap { $0 as! TISInputSource? }
+        let sources = (cf as NSArray) as? [TISInputSource] ?? []
         for src in sources {
             let selectable = (TISGetInputSourceProperty(src, kTISPropertyInputSourceIsSelectCapable)
                 .map { CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque($0).takeUnretainedValue()) }) ?? false

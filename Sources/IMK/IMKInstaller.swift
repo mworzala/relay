@@ -109,7 +109,7 @@ enum IMKInstaller {
     static func ourSources() -> [TISInputSource] {
         let filter = [kTISPropertyBundleID as String: IMKMessaging.helperBundleID] as CFDictionary
         guard let cf = TISCreateInputSourceList(filter, true)?.takeRetainedValue() else { return [] }
-        return (cf as NSArray).compactMap { $0 as! TISInputSource? }
+        return (cf as NSArray) as? [TISInputSource] ?? []
     }
 
     static func stringProp(_ src: TISInputSource?, _ key: CFString) -> String {

@@ -10,8 +10,11 @@ nonisolated enum AXFocus {
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(
             system, kAXFocusedUIElementAttribute as CFString, &value)
-        guard result == .success, let value else { return nil }
-        // The attribute value is an AXUIElement.
+        // Guard the type before the cast (matching the AXValue helpers): a forced
+        // CFTypeRef cast would trap rather than degrade if the API ever returns
+        // something else.
+        guard result == .success, let value,
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return (value as! AXUIElement)
     }
 }
@@ -65,7 +68,7 @@ nonisolated enum AXText {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
             app, kAXFocusedUIElementAttribute as CFString, &value) == .success,
-            let value else { return nil }
+            let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return (value as! AXUIElement)
     }
 
