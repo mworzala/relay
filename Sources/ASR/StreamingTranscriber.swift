@@ -108,6 +108,11 @@ final class StreamingTranscriber {
                 var state = TdtDecoderState.make(decoderLayers: decoderLayers)
                 if let result = try? await manager.transcribe(
                     snapshot, decoderState: &state, language: language) {
+                    // Re-gate after the await: finish()/cancel() set isStreaming=false
+                    // and cancel the loop, but an in-flight transcribe isn't aborted,
+                    // so its continuation could otherwise push one stale live
+                    // hypothesis (marked-text / AX / overlay) just as the session ends.
+                    guard isStreaming, !Task.isCancelled else { return }
                     applyLocalAgreement(to: result.text)
                 }
             }
