@@ -160,6 +160,7 @@ targets:
       - path: Sources/Probe
       - path: Sources/Shared/AppPaths.swift
       - path: Sources/Shared/WordCount.swift   # shared word-split used by StreamingTranscriber
+      - path: Sources/Shared/HypothesisText.swift   # confirmed+volatile joiner used by StreamingTranscriber
       - path: Sources/ASR/ParakeetModel.swift
       - path: Sources/ASR/StreamingTranscriber.swift
       - path: Sources/ASR/LocalAgreement.swift   # pure commit rule used by StreamingTranscriber

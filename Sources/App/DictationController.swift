@@ -230,7 +230,7 @@ final class DictationController {
                     // in the field itself; honor "live unconfirmed text" (off → only the
                     // settled prefix is previewed). The final commit lands on release.
                     let preview = self.settings.injectUnconfirmedText
-                        ? Self.joined(confirmed, volatile)
+                        ? HypothesisText.join(confirmed: confirmed, volatile: volatile)
                         : confirmed
                     self.imk.renderMarked(self.unifyForIMK(preview))
                 }
@@ -243,7 +243,7 @@ final class DictationController {
                     // monotonically, so the field appends smoothly and never
                     // backspace-storms (the tail lands from the final pass on release).
                     let target = self.settings.injectUnconfirmedText
-                        ? Self.joined(confirmed, volatile)
+                        ? HypothesisText.join(confirmed: confirmed, volatile: volatile)
                         : confirmed
                     self.injector.render(target)
                 case .overlayPaste:
@@ -356,10 +356,4 @@ final class DictationController {
             lastOp: op))
     }
 
-    /// Join the committed prefix and the volatile tail into the live target text.
-    private static func joined(_ confirmed: String, _ volatile: String) -> String {
-        [confirmed, volatile]
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-    }
 }

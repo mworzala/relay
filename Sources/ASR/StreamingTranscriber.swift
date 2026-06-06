@@ -138,9 +138,7 @@ final class StreamingTranscriber {
     // MARK: - Helpers
 
     private func combined() -> String {
-        [confirmed, volatile]
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        HypothesisText.join(confirmed: confirmed, volatile: volatile)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
