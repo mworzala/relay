@@ -34,6 +34,18 @@ enum HistoryStore {
             appName: appName,
             durationSeconds: durationSeconds
         ))
-        try? context.save()
+        save(context, op: "add transcription")
+    }
+
+    /// Save the context, logging (never silently swallowing) any failure. A dropped
+    /// save loses a finalized transcript and silently undercounts stats, so the
+    /// error must at least reach the logs (mirrors AppSettings.save).
+    @MainActor
+    static func save(_ context: ModelContext, op: String) {
+        do {
+            try context.save()
+        } catch {
+            NSLog("Relay: failed to save history (\(op)): \(error)")
+        }
     }
 }

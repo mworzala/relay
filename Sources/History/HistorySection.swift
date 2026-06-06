@@ -43,13 +43,13 @@ struct HistorySection: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         context.insert(Transcription(text: text))
-        try? context.save()
+        HistoryStore.save(context, op: "add draft")
         draft = ""
     }
 
     private func remove(_ item: Transcription) {
         context.delete(item)
-        try? context.save()
+        HistoryStore.save(context, op: "remove")
     }
 }
 
