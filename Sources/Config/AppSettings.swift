@@ -45,8 +45,7 @@ final class AppSettings {
     }
 
     init() {
-        if let data = try? Data(contentsOf: AppPaths.settingsFile),
-           let snap = try? JSONDecoder().decode(Snapshot.self, from: data) {
+        if let snap = Self.loadSnapshot() {
             micPriority = snap.micPriority
             keybind = snap.keybind
             launchAtLogin = snap.launchAtLogin
@@ -66,6 +65,29 @@ final class AppSettings {
             imkEnabled = false
             imkEngagementMode = .alwaysOn
             micKeepAlive = .seconds30
+        }
+    }
+
+    /// Load the persisted snapshot, distinguishing "no file yet" (legitimate first
+    /// run → nil, use defaults silently) from "file exists but won't decode" (a torn
+    /// write, disk corruption, manual edit, or future required-field schema change).
+    /// In the corrupt case, decoding silently into defaults would reset the keybind,
+    /// empty mic priority, and re-trigger onboarding with no trace — so we log it and
+    /// rename the bad file to settings.json.corrupt (preserving it for diagnosis)
+    /// before the next save overwrites the original.
+    private static func loadSnapshot() -> Snapshot? {
+        let url = AppPaths.settingsFile
+        guard let data = try? Data(contentsOf: url) else {
+            return nil   // no file → first run
+        }
+        do {
+            return try JSONDecoder().decode(Snapshot.self, from: data)
+        } catch {
+            NSLog("Relay: settings at \(url.path) failed to decode (\(error)); preserving as .corrupt and resetting to defaults")
+            let backup = url.appendingPathExtension("corrupt")
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.moveItem(at: url, to: backup)
+            return nil
         }
     }
 
