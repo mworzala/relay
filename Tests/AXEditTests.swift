@@ -99,4 +99,20 @@ nonisolated final class AXEditTests: XCTestCase {
             AXText.splicedValue("hi", insertionStart: 2, regionLength: 0, target: "👍"),
             "hi👍")
     }
+
+    func testSplicedValueDoesNotSplitSurrogatePairAtStart() {
+        // insertionStart 2 lands on the low half of 😀 (a,D83D,DE00,b). Without
+        // boundary snapping the slice would leave a lone high+low surrogate around the
+        // target (→ U+FFFD). The boundary must snap so the emoji survives intact.
+        let r = AXText.splicedValue("a😀b", insertionStart: 2, regionLength: 0, target: "X")
+        XCTAssertFalse(r.unicodeScalars.contains("\u{FFFD}"))
+        XCTAssertEqual(r, "aX😀b")
+    }
+
+    func testSplicedValueDoesNotSplitSurrogatePairAtEnd() {
+        // The region end (1+1=2) bisects 😀; it must snap so no lone surrogate remains.
+        let r = AXText.splicedValue("a😀b", insertionStart: 1, regionLength: 1, target: "X")
+        XCTAssertFalse(r.unicodeScalars.contains("\u{FFFD}"))
+        XCTAssertEqual(r, "aX😀b")
+    }
 }

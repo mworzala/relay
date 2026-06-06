@@ -172,10 +172,25 @@ nonisolated enum AXText {
     /// write path. Offsets are clamped into bounds.
     static func splicedValue(_ value: String, insertionStart: Int, regionLength: Int, target: String) -> String {
         let units = Array(value.utf16)
-        let start = min(max(0, insertionStart), units.count)
-        let end = min(start + max(0, regionLength), units.count)
+        var start = min(max(0, insertionStart), units.count)
+        var end = min(start + max(0, regionLength), units.count)
+        // Never bisect a surrogate pair at either boundary: a boundary landing on a
+        // pair's low half would leave a lone surrogate adjacent to `target` and
+        // corrupt that grapheme (→ U+FFFD). Snap such a boundary back to the pair
+        // start (same defense AXEdit.compute applies to its prefix/suffix seams).
+        start = snappedToPairBoundary(start, in: units)
+        end = max(start, snappedToPairBoundary(end, in: units))
         let newUnits = Array(units[0..<start]) + Array(target.utf16) + Array(units[end...])
         return String(utf16CodeUnits: newUnits, count: newUnits.count)
+    }
+
+    /// If `i` points at the low half of a surrogate pair, snap back to the high half
+    /// so a slice at `i` never splits the pair.
+    private static func snappedToPairBoundary(_ i: Int, in units: [UInt16]) -> Int {
+        guard i > 0, i < units.count else { return i }
+        let isLow = (0xDC00...0xDFFF).contains(units[i])
+        let prevHigh = (0xD800...0xDBFF).contains(units[i - 1])
+        return (isLow && prevHigh) ? i - 1 : i
     }
 
     /// Atomic range replacement: select `range`, then overwrite it with `string`.
