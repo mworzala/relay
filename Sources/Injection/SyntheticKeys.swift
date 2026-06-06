@@ -33,6 +33,15 @@ nonisolated enum SyntheticKeys {
         post(CGKeyCode(kVK_RightArrow))
     }
 
+    /// Move the caret left by `count` presses of the Left arrow (no modifiers). Used
+    /// to back the caret up from the field end to the end of a *mid-field* insertion,
+    /// after `moveCaretToEnd` over-shoots past the preserved trailing text. `count` is
+    /// a UTF-16 unit count (≈ one arrow press per unit for ordinary text).
+    static func moveLeft(by count: Int) {
+        guard count > 0 else { return }
+        for _ in 0..<count { post(CGKeyCode(kVK_LeftArrow)) }
+    }
+
     /// Paste the current clipboard contents at the caret: ⌘V. Routes through the
     /// app's native edit pipeline, so the caret lands after the inserted text and a
     /// single undo reverts it — the basis of "Overlay + paste" insertion. The flag

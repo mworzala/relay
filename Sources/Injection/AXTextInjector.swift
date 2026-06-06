@@ -32,6 +32,7 @@ nonisolated final class AXTextInjector: TextInjecting, @unchecked Sendable {
     private var initialSelection = 0     // selection length to replace on the 1st write
     private var insertedLength = 0       // UTF-16 length we last wrote (our region size)
     private var lastWritten = ""         // last target we wrote (no-op + first-write check)
+    private var trailingLength = 0       // UTF-16 units after our region (mid-field splice)
     private var active = false
     private var report: (@Sendable (String) -> Void)?
     private var fallback: (@Sendable () -> Void)?
@@ -44,6 +45,7 @@ nonisolated final class AXTextInjector: TextInjecting, @unchecked Sendable {
             self.fallback = context.fallback
             self.lastWritten = ""
             self.insertedLength = 0
+            self.trailingLength = 0
             guard let element = context.element else {
                 self.element = nil
                 self.active = false
@@ -127,8 +129,15 @@ nonisolated final class AXTextInjector: TextInjecting, @unchecked Sendable {
             // with ⌘A→→ once the async DOM rebuild settles. (Native fields use
             // selectedText mode and are already positioned by the line above.)
             if final, writeMode == .value {
+                // moveCaretToEnd (⌘A→→) lands at the absolute end of the field, which
+                // is correct only when nothing follows our insertion. For a mid-field
+                // splice (preserved trailing text) back the caret up by the trailing
+                // length so it lands at the end of the dictation, not past the
+                // following text.
+                let trailing = trailingLength
                 queue.asyncAfter(deadline: .now() + 0.15) {
                     SyntheticKeys.moveCaretToEnd()
+                    SyntheticKeys.moveLeft(by: trailing)
                 }
             }
             insertedLength = target.utf16.count
@@ -174,7 +183,11 @@ nonisolated final class AXTextInjector: TextInjecting, @unchecked Sendable {
             let newValue: String
             if insertionStart == 0 {
                 newValue = target
+                trailingLength = 0   // whole value replaced — nothing after the caret
             } else if let value = AXText.value(of: element) {
+                // UTF-16 units after our region = preserved trailing text the final
+                // caret repair must back up over.
+                trailingLength = max(0, value.utf16.count - (insertionStart + regionLength))
                 newValue = AXText.splicedValue(
                     value, insertionStart: insertionStart, regionLength: regionLength, target: target)
             } else {
