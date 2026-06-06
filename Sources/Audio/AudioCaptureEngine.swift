@@ -43,6 +43,11 @@ final class AudioCaptureEngine {
     /// The device the running session was built for, so `warm` can no-op when
     /// already warm on the right device and rebuild when it changes.
     @ObservationIgnored private(set) var currentDeviceUID: String?
+    /// Bumped whenever the level sink is (re)attached or detached. A per-buffer level
+    /// update hops to the main actor asynchronously, so one computed just before a
+    /// detach could otherwise land after the synchronous `level = 0` and freeze the
+    /// meter; updates carrying a stale epoch are dropped.
+    @ObservationIgnored private var levelEpoch = 0
 
     // MARK: - Session lifecycle (warm/cool) — separate from the dictation sink so the
     // session can stay running between dictations (no per-press cold start).
@@ -96,20 +101,29 @@ final class AudioCaptureEngine {
     /// Route captured samples to `onSamples` (and drive the level meter). The session
     /// must already be warm. `onSamples` runs on the capture queue; keep it cheap.
     func attachSink(_ onSamples: @escaping @Sendable ([Float]) -> Void) {
+        levelEpoch &+= 1
+        let epoch = levelEpoch
         delegate.setHandlers(
             onSamples: onSamples,
-            onLevel: { [weak self] level in Task { @MainActor in self?.level = level } }
+            onLevel: { [weak self] level in
+                Task { @MainActor in
+                    guard let self, self.levelEpoch == epoch else { return }   // stale: a detach/reattach happened
+                    self.level = level
+                }
+            }
         )
     }
 
     /// Stop routing samples (the session stays warm). The meter goes idle.
     func detachSink() {
+        levelEpoch &+= 1   // invalidate in-flight level updates so the meter stays at 0
         delegate.setHandlers(onSamples: nil, onLevel: nil)
         level = 0
     }
 
     /// Stop and tear down the session entirely (releases the mic / its indicator).
     func cool() {
+        levelEpoch &+= 1   // drop any in-flight level updates so the meter stays at 0
         teardownSession()
         isRunning = false
         level = 0
