@@ -249,21 +249,33 @@ nonisolated final class DictationStatsTests: XCTestCase {
 
     // MARK: - Shared word-count definition
 
-    func testWordCountMatchesStreamingDefinition() {
-        let cases = [
-            "", "   ", "hello", "hello world", "  hello   world  ",
-            "a\tb\nc", "\n\t  \n", "one two  three\tfour\nfive",
-            "trailing ", " leading", "multiple\n\nnewlines",
+    func testWordCountSplitsOnSpaceNewlineTab() {
+        // Pin the actual definition against explicit expectations. (The old test only
+        // asserted WordCount.words == StreamingTranscriber.words, but the latter just
+        // forwards to the former, so it reduced to x == x and couldn't detect drift.)
+        let cases: [(String, [String])] = [
+            ("", []),
+            ("   ", []),
+            ("hello", ["hello"]),
+            ("hello world", ["hello", "world"]),
+            ("  hello   world  ", ["hello", "world"]),
+            ("a\tb\nc", ["a", "b", "c"]),
+            ("\n\t  \n", []),
+            ("one two  three\tfour\nfive", ["one", "two", "three", "four", "five"]),
+            ("trailing ", ["trailing"]),
+            (" leading", ["leading"]),
+            ("multiple\n\nnewlines", ["multiple", "newlines"]),
         ]
-        for input in cases {
-            XCTAssertEqual(
-                WordCount.count(input),
-                StreamingTranscriber.words(input).count,
-                "count/words disagree for \(input.debugDescription)")
-            XCTAssertEqual(
-                WordCount.words(input),
-                StreamingTranscriber.words(input),
-                "word split disagrees for \(input.debugDescription)")
+        for (input, expected) in cases {
+            XCTAssertEqual(WordCount.words(input), expected, "words for \(input.debugDescription)")
+            XCTAssertEqual(WordCount.count(input), expected.count, "count for \(input.debugDescription)")
         }
+    }
+
+    func testStreamingWordsDelegatesToWordCount() {
+        // Documents the single-source-of-truth invariant (StreamingTranscriber.words
+        // is WordCount.words) so a future reimplementation that diverges is caught.
+        XCTAssertEqual(StreamingTranscriber.words("one two\tthree\nfour"),
+                       WordCount.words("one two\tthree\nfour"))
     }
 }

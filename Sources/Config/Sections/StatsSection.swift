@@ -14,18 +14,7 @@ struct StatsSection: View {
     @State private var period: StatPeriod = .allTime
 
     private var stats: DictationStats {
-        let snapshots = items.map { item in
-            TranscriptionSnapshot(
-                timestamp: item.timestamp,
-                // Pre-stats rows stored wordCount 0; recompute from text so they
-                // still contribute to totals (they land in the Unknown app bucket).
-                wordCount: item.wordCount > 0 ? item.wordCount : WordCount.count(item.text),
-                characterCount: item.text.count,
-                durationSeconds: item.durationSeconds,
-                appBundleID: item.appBundleID,
-                appName: item.appName
-            )
-        }
+        let snapshots = items.map(\.statsSnapshot)
         return DictationStats.compute(from: snapshots, now: Date(), period: period)
     }
 

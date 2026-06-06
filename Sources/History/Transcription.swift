@@ -44,4 +44,18 @@ final class Transcription {
         self.durationSeconds = durationSeconds
         self.wordCount = WordCount.count(text)
     }
+
+    /// A pure `Sendable` snapshot for the stats aggregator. The single home for the
+    /// migrated-row rule: pre-stats rows stored `wordCount == 0`, so recompute from
+    /// `text` (otherwise they'd silently drop from totals). Used by both the stats UI
+    /// and the persistence tests so the mapping can't drift between them.
+    var statsSnapshot: TranscriptionSnapshot {
+        TranscriptionSnapshot(
+            timestamp: timestamp,
+            wordCount: wordCount > 0 ? wordCount : WordCount.count(text),
+            characterCount: text.count,
+            durationSeconds: durationSeconds,
+            appBundleID: appBundleID,
+            appName: appName)
+    }
 }

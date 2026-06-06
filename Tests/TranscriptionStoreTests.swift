@@ -72,15 +72,9 @@ nonisolated final class TranscriptionStoreTests: XCTestCase {
         XCTAssertEqual(full.wordCount, 5)
 
         // --- Stats fold the loaded rows correctly ---
-        let snapshots = rows.map { row in
-            TranscriptionSnapshot(
-                timestamp: row.timestamp,
-                wordCount: row.wordCount > 0 ? row.wordCount : WordCount.count(row.text),
-                characterCount: row.text.count,
-                durationSeconds: row.durationSeconds,
-                appBundleID: row.appBundleID,
-                appName: row.appName)
-        }
+        // Use the same production mapping the stats UI uses (Transcription.statsSnapshot),
+        // so this test exercises the real row→snapshot/migrated-count rule, not a copy.
+        let snapshots = rows.map(\.statsSnapshot)
         let stats = DictationStats.compute(from: snapshots, now: fixedTimestamp.addingTimeInterval(120), period: .allTime)
 
         XCTAssertEqual(stats.totalWords, 8)        // both rows counted

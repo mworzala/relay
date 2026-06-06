@@ -55,12 +55,19 @@ nonisolated final class PasteInjector: @unchecked Sendable {
         // the app) copied something new since our write, and restoring the old
         // snapshot would clobber it; leave the newer content in place.
         Thread.sleep(forTimeInterval: restoreDelay)
-        if NSPasteboard.general.changeCount == afterWrite {
+        if shouldRestore(afterWrite: afterWrite, current: NSPasteboard.general.changeCount) {
             Clipboard.restore(saved)
             trace("restored prior clipboard")
         } else {
             trace("clipboard changed during paste — leaving newer contents")
         }
+    }
+
+    /// Whether to restore the prior clipboard: only when nothing wrote to the board
+    /// since our paste write (an unchanged count). A changed count means a competing
+    /// copy we must not clobber. Extracted so the decision is unit-testable.
+    static func shouldRestore(afterWrite: Int, current: Int) -> Bool {
+        current == afterWrite
     }
 
     private static func trace(_ message: @autoclosure () -> String) {
