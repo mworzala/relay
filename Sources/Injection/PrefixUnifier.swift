@@ -46,8 +46,10 @@ nonisolated enum PrefixUnifier {
     /// (case-insensitive, punctuation-insensitive). Requires ≥2 overlapping tokens,
     /// or a single token of length ≥ `minLongToken`, to avoid false positives.
     static func applyDedup(prefix: String, dictation: String) -> String {
-        let prefixWords = prefix.split(whereSeparator: \.isWhitespace).map(String.init)
-        let dictWords = dictation.split(whereSeparator: \.isWhitespace).map(String.init)
+        // Use the single word-split source of truth (space/newline/tab) so dedup
+        // tokenizes identically to what the ASR layer commits and the stats count.
+        let prefixWords = WordCount.words(prefix)
+        let dictWords = WordCount.words(dictation)
         guard !prefixWords.isEmpty, !dictWords.isEmpty else { return dictation }
 
         let tail = prefixWords.suffix(6).map(normalizedToken)
