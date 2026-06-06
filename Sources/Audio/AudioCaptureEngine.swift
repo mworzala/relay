@@ -40,15 +40,19 @@ final class AudioCaptureEngine {
     @ObservationIgnored private var runtimeObserver: NSObjectProtocol?
     @ObservationIgnored private let sampleQueue = DispatchQueue(label: "com.relay.audio.capture")
     @ObservationIgnored private let delegate = SampleDelegate()
+    /// The device the running session was built for, so `warm` can no-op when
+    /// already warm on the right device and rebuild when it changes.
+    @ObservationIgnored private(set) var currentDeviceUID: String?
 
-    /// Start capturing 16 kHz mono samples from the device with `deviceUID`
-    /// (nil / not found → system default audio device). `onSamples` runs on the
-    /// capture queue; keep it cheap.
-    func start(
-        deviceUID: String?,
-        onSamples: @escaping @Sendable ([Float]) -> Void
-    ) throws {
-        stop()
+    // MARK: - Session lifecycle (warm/cool) — separate from the dictation sink so the
+    // session can stay running between dictations (no per-press cold start).
+
+    /// Ensure the capture session is **running** on `deviceUID` (nil / not found →
+    /// system default). No-op if already warm on that device; rebuilds if it changed.
+    /// Does NOT attach a sample handler — a warm-but-idle session discards buffers.
+    func warm(deviceUID: String?) throws {
+        if isRunning, deviceUID == currentDeviceUID { return }
+        teardownSession()
 
         let device = deviceUID.flatMap { CaptureDeviceResolver.device(forUID: $0) }
             ?? AVCaptureDevice.default(for: .audio)
@@ -64,12 +68,6 @@ final class AudioCaptureEngine {
         session.addInput(input)
 
         let output = AVCaptureAudioDataOutput()
-        delegate.setHandlers(
-            onSamples: onSamples,
-            onLevel: { [weak self] level in
-                Task { @MainActor in self?.level = level }
-            }
-        )
         output.setSampleBufferDelegate(delegate, queue: sampleQueue)
         guard session.canAddOutput(output) else {
             session.commitConfiguration()
@@ -85,12 +83,35 @@ final class AudioCaptureEngine {
         }
 
         self.session = session
+        self.currentDeviceUID = deviceUID
         // startRunning() blocks; never call it on the main actor.
         sampleQueue.async { session.startRunning() }
         isRunning = true
     }
 
-    func stop() {
+    /// Route captured samples to `onSamples` (and drive the level meter). The session
+    /// must already be warm. `onSamples` runs on the capture queue; keep it cheap.
+    func attachSink(_ onSamples: @escaping @Sendable ([Float]) -> Void) {
+        delegate.setHandlers(
+            onSamples: onSamples,
+            onLevel: { [weak self] level in Task { @MainActor in self?.level = level } }
+        )
+    }
+
+    /// Stop routing samples (the session stays warm). The meter goes idle.
+    func detachSink() {
+        delegate.setHandlers(onSamples: nil, onLevel: nil)
+        level = 0
+    }
+
+    /// Stop and tear down the session entirely (releases the mic / its indicator).
+    func cool() {
+        teardownSession()
+        isRunning = false
+        level = 0
+    }
+
+    private func teardownSession() {
         if let runtimeObserver {
             NotificationCenter.default.removeObserver(runtimeObserver)
             self.runtimeObserver = nil
@@ -100,9 +121,18 @@ final class AudioCaptureEngine {
             sampleQueue.async { session.stopRunning() }
         }
         session = nil
-        isRunning = false
-        level = 0
+        currentDeviceUID = nil
     }
+
+    // MARK: - One-shot convenience (used by relay-asr-probe)
+
+    /// Start capturing in one call: warm the session and attach `onSamples`.
+    func start(deviceUID: String?, onSamples: @escaping @Sendable ([Float]) -> Void) throws {
+        try warm(deviceUID: deviceUID)
+        attachSink(onSamples)
+    }
+
+    func stop() { cool() }
 }
 
 /// Resolves a persisted device UID to an `AVCaptureDevice`. For HAL audio devices
@@ -147,12 +177,14 @@ private nonisolated final class SampleDelegate: NSObject,
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        // Warm-but-idle: no handlers set → discard without paying the resample cost.
+        let snapshot = handlers.withLock { $0 }
+        guard snapshot.onSamples != nil || snapshot.onLevel != nil else { return }
         guard let samples = try? converter.resampleSampleBuffer(sampleBuffer), !samples.isEmpty else {
             return
         }
         let rms = AudioLevelMeter.levels(from: samples).rms
         let level = AudioLevelMeter.normalizedLevel(rms: rms)
-        let snapshot = handlers.withLock { $0 }   // copy out; don't call closures under the lock
         snapshot.onLevel?(level)
         snapshot.onSamples?(samples)
     }

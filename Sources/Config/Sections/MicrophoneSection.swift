@@ -10,8 +10,30 @@ struct MicrophoneSection: View {
     @State private var testing = false
 
     var body: some View {
+        @Bindable var settings = settings
         VStack(alignment: .leading, spacing: 14) {
             levelMeter
+
+            HStack {
+                Text("Keep microphone ready")
+                Spacer()
+                Picker("", selection: $settings.micKeepAlive) {
+                    ForEach(MicKeepAlive.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .onChange(of: settings.micKeepAlive) { _, _ in
+                    settings.save()
+                    mic.applyKeepAlivePolicy()
+                }
+            }
+            Text("Starting the mic cold takes a moment (longer for Bluetooth), which can clip your first word. Keeping it warm after you finish makes the next dictation start instantly. While warm, the microphone-in-use indicator stays on, a little battery is used, and a Bluetooth headset stays in low-quality call mode. “Always” keeps it ready the whole time Relay runs (the first dictation never clips); “Disabled” starts fresh each time.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
 
             Text("Priority order")
                 .font(.headline)

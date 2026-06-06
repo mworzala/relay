@@ -51,6 +51,7 @@ final class AppModel {
 
         AppModel.shared = self
         mic.priorityProvider = { [settings] in settings.micPriority }
+        mic.keepAliveProvider = { [settings] in settings.micKeepAlive }
 
         // Wire the dictation lifecycle to the floating pill (shown in both modes).
         overlay.levelSource = { [mic] in mic.level }
@@ -81,6 +82,7 @@ final class AppModel {
         }
 
         mic.startMonitoring()
+        mic.applyKeepAlivePolicy()   // pre-warm the mic now if the user chose "Always"
         dictation.activate()
         // Bring the input method online if the user left it enabled (re-selects it
         // for always-on, launches the helper, starts listening for engage events).

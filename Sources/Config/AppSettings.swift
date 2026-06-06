@@ -27,6 +27,9 @@ final class AppSettings {
     var imkEnabled: Bool
     /// How the input method engages when `imkEnabled` is on. See `IMKEngagementMode`.
     var imkEngagementMode: IMKEngagementMode
+    /// How long to keep the mic warm after a dictation so the next one starts
+    /// instantly (no cold-start clipping the first word). See `MicKeepAlive`.
+    var micKeepAlive: MicKeepAlive
 
     /// The exact subset written to disk.
     private struct Snapshot: Codable {
@@ -38,6 +41,7 @@ final class AppSettings {
         var insertionMode: InsertionMode?      // added later; nil in old files → .typeDirectly
         var imkEnabled: Bool?                  // added later; nil in old files → false
         var imkEngagementMode: IMKEngagementMode?  // added later; nil in old files → .alwaysOn
+        var micKeepAlive: MicKeepAlive?        // added later; nil in old files → .seconds30
     }
 
     init() {
@@ -51,6 +55,7 @@ final class AppSettings {
             insertionMode = snap.insertionMode ?? .typeDirectly
             imkEnabled = snap.imkEnabled ?? false
             imkEngagementMode = snap.imkEngagementMode ?? .alwaysOn
+            micKeepAlive = snap.micKeepAlive ?? .seconds30
         } else {
             micPriority = []
             keybind = .rightCommand
@@ -60,6 +65,7 @@ final class AppSettings {
             insertionMode = .typeDirectly
             imkEnabled = false
             imkEngagementMode = .alwaysOn
+            micKeepAlive = .seconds30
         }
     }
 
@@ -74,7 +80,8 @@ final class AppSettings {
             injectUnconfirmedText: injectUnconfirmedText,
             insertionMode: insertionMode,
             imkEnabled: imkEnabled,
-            imkEngagementMode: imkEngagementMode
+            imkEngagementMode: imkEngagementMode,
+            micKeepAlive: micKeepAlive
         )
         do {
             let encoder = JSONEncoder()
