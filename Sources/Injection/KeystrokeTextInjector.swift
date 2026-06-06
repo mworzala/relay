@@ -83,7 +83,9 @@ nonisolated final class KeystrokeTextInjector: TextInjecting, @unchecked Sendabl
         }
 
         if Self.debugLogging {
-            NSLog("Relay/inject typed=\(typed.count) target=\(target.count) backspaces=\(plan.backspaces) insert=\"\(String(plan.insert.prefix(30)))\" focusMoved=\(focusMoved)")
+            // Never log transcript contents — only metadata (matches the rest of
+            // the injection stack and the project's privacy invariant).
+            NSLog("Relay/inject typed=\(typed.count) target=\(target.count) backspaces=\(plan.backspaces) insertLen=\(plan.insert.count) focusMoved=\(focusMoved)")
         }
 
         postBackspaces(plan.backspaces)
