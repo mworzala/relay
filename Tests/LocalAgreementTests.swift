@@ -47,6 +47,16 @@ nonisolated final class LocalAgreementTests: XCTestCase {
         XCTAssertEqual(r.volatile, [])
     }
 
+    func testCapitalizationFlipDoesNotDelayCommit() {
+        // "the" is committed lowercase; the agreeing passes capitalize it ("The")
+        // and agree on a following "cat". A case-sensitive guard used to refuse to
+        // commit "cat" for a pass; now it commits immediately, and the committed
+        // casing of "the" is preserved.
+        let r = step(["The", "cat", "x"], ["The", "cat", "y"], ["the"])
+        XCTAssertEqual(r.confirmed, ["the", "cat"])
+        XCTAssertEqual(r.volatile, ["y"])
+    }
+
     func testRevisedCommittedWordIsNotDroppedFromVolatile() {
         // [the, cat] is already committed; a later pass revises "cat" → "dog" and
         // extends with "sat". The committed prefix stays locked, but the revised

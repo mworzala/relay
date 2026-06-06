@@ -31,8 +31,12 @@ nonisolated enum LocalAgreement {
         var newConfirmed = confirmed
         if agree > confirmed.count {
             let candidate = Array(curr.prefix(agree))
-            if confirmed.isEmpty || candidate.starts(with: confirmed) {
-                newConfirmed = candidate
+            // Consistency check is case-insensitive to match the agreement above —
+            // a capitalization flip on a settled word must not delay its commit by a
+            // pass. Keep the already-committed words' casing (append only the newly
+            // agreed ones) so confirmed text never visually changes.
+            if confirmed.isEmpty || sharedPrefixCount(candidate, confirmed) == confirmed.count {
+                newConfirmed = confirmed + candidate[confirmed.count...]
             }
         }
 
