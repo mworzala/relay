@@ -14,6 +14,13 @@ import Foundation
 ///
 /// `nonisolated` + `@unchecked Sendable`: all pasteboard + CGEvent work runs on a
 /// private serial queue, off the main actor, mirroring the other injectors.
+///
+/// Known limitation: if the process is *abnormally* terminated (crash / SIGKILL)
+/// during the brief restore window below, the last dictated text is left on the
+/// clipboard and the prior contents aren't restored. This is inherent to
+/// clipboard-based paste injection — a signal handler can't safely call
+/// `NSPasteboard`, and a graceful quit landing inside the sub-second window is
+/// negligible — so it's accepted rather than guarded.
 nonisolated final class PasteInjector: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.relay.paste-injector")
 
