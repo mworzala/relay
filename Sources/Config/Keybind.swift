@@ -7,7 +7,7 @@ import AppKit
 /// `modifiers` is empty; for a regular combo, `modifiers` holds the accompanying
 /// modifier flags (raw value of `NSEvent.ModifierFlags`) and `keyCode` is the
 /// non-modifier key.
-struct Keybind: Codable, Equatable, Hashable, Sendable {
+nonisolated struct Keybind: Codable, Equatable, Hashable, Sendable {
     var keyCode: UInt16
     var modifiers: UInt
     var isBareModifier: Bool
@@ -16,6 +16,20 @@ struct Keybind: Codable, Equatable, Hashable, Sendable {
     static let rightCommand = Keybind(keyCode: 54, modifiers: 0, isBareModifier: true)
 
     var modifierFlags: NSEvent.ModifierFlags { NSEvent.ModifierFlags(rawValue: modifiers) }
+
+    /// The device-independent modifier flag a *bare-modifier* bind corresponds to
+    /// (nil for a non-bare bind or an unknown key). Used to self-correct the
+    /// press/release state when the modifier is unambiguously released.
+    var bareModifierFlag: NSEvent.ModifierFlags? {
+        switch keyCode {
+        case 54, 55: return .command
+        case 58, 61: return .option
+        case 56, 60: return .shift
+        case 59, 62: return .control
+        case 63: return .function
+        default: return nil
+        }
+    }
 
     /// Human-readable label for the keybind UI.
     var displayString: String {

@@ -10,7 +10,7 @@ import AppKit
 /// emits exactly one `.flagsChanged` for that key code, so toggling reliably
 /// distinguishes down vs up even when the same device-independent flag (e.g.
 /// `.command`) is also held by the other side (Left vs Right).
-struct HotkeyMatcher {
+nonisolated struct HotkeyMatcher {
     enum Transition { case press, release }
 
     var keybind: Keybind
@@ -23,7 +23,19 @@ struct HotkeyMatcher {
 
     mutating func handleFlagsChanged(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> Transition? {
         guard keybind.isBareModifier, keyCode == keybind.keyCode else { return nil }
-        bareKeyIsDown.toggle()
+        let wasDown = bareKeyIsDown
+        if let bit = keybind.bareModifierFlag, flags.intersection(bit).isEmpty {
+            // The bound modifier's flag is gone → the key is definitively UP, whatever
+            // a (possibly desynced) toggle thought. This self-corrects a missed event:
+            // a release that arrives while we think we're already up emits no spurious
+            // press. The flag is absent only when no side holds the modifier.
+            bareKeyIsDown = false
+        } else {
+            // Flag still present (the other Left/Right side may hold the same
+            // device-independent flag) or an unknown key → toggle, as before.
+            bareKeyIsDown.toggle()
+        }
+        guard bareKeyIsDown != wasDown else { return nil }   // no real transition
         return bareKeyIsDown ? .press : .release
     }
 
@@ -44,5 +56,5 @@ struct HotkeyMatcher {
 
 extension NSEvent.ModifierFlags {
     /// The modifier bits we consider for combo matching (ignore caps lock, fn, etc.).
-    static let relevant: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+    nonisolated static let relevant: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
 }
