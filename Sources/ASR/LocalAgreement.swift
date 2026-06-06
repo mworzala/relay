@@ -36,8 +36,24 @@ nonisolated enum LocalAgreement {
             }
         }
 
-        let committedCount = newConfirmed.count
-        let volatile = curr.count > committedCount ? Array(curr[committedCount...]) : []
+        // Slice the volatile tail from where the current hypothesis stops matching
+        // the committed prefix — NOT blindly at committedCount. Because each pass
+        // re-transcribes the whole growing buffer, Parakeet can revise an
+        // already-committed early word as more right-context arrives (committed
+        // [the, cat], next [the, dog, sat]); indexing past that divergence would
+        // silently drop "dog" live. Slicing at the shared-prefix length keeps every
+        // current word visible; the committed prefix stays locked and the
+        // authoritative final pass reconciles any locked/current conflict.
+        let volatileStart = sharedPrefixCount(curr, newConfirmed)
+        let volatile = curr.count > volatileStart ? Array(curr[volatileStart...]) : []
         return (newConfirmed, volatile)
+    }
+
+    /// Length of the longest case-insensitive shared word-prefix of `a` and `b`.
+    private static func sharedPrefixCount(_ a: [String], _ b: [String]) -> Int {
+        var n = 0
+        let bound = min(a.count, b.count)
+        while n < bound, a[n].lowercased() == b[n].lowercased() { n += 1 }
+        return n
     }
 }

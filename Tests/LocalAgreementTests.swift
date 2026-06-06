@@ -46,4 +46,14 @@ nonisolated final class LocalAgreementTests: XCTestCase {
         let r = step(["the"], [], ["the"])
         XCTAssertEqual(r.volatile, [])
     }
+
+    func testRevisedCommittedWordIsNotDroppedFromVolatile() {
+        // [the, cat] is already committed; a later pass revises "cat" → "dog" and
+        // extends with "sat". The committed prefix stays locked, but the revised
+        // "dog" must remain visible in the volatile tail rather than being sliced
+        // away by a stale index (which would render "the cat sat", dropping "dog").
+        let r = step(["the", "cat"], ["the", "dog", "sat"], ["the", "cat"])
+        XCTAssertEqual(r.confirmed, ["the", "cat"])
+        XCTAssertEqual(r.volatile, ["dog", "sat"])
+    }
 }
