@@ -12,17 +12,21 @@ import Carbon
 /// mode; enabling/selecting the container returns paramErr (-50)).
 enum IMKInstaller {
 
-    /// The embedded helper inside Relay.app (the install payload).
+    /// The embedded helper inside Relay.app (the install payload). Stable name in
+    /// every variant so the Xcode embed phase is happy; the variants are separated at
+    /// install time by the destination name (see `installURL`).
     static var embeddedAppURL: URL? {
         let url = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Library/InputMethods/RelayInputMethod.app")
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    /// Where an installed IME must live.
+    /// Where an installed IME must live. The wrapper name is variant-suffixed
+    /// (RelayInputMethod.app vs RelayInputMethod.dev.app) so the dev and installed
+    /// copies don't overwrite each other in ~/Library/Input Methods/.
     static var installURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Input Methods/RelayInputMethod.app")
+            .appendingPathComponent("Library/Input Methods/\(IMKMessaging.installedHelperAppName)")
     }
 
     /// Outcome of the copy+register step. Whether the source is actually *usable*

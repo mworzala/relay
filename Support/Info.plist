@@ -28,6 +28,10 @@
 	     a dev build and an installed build don't share settings/history. -->
 	<key>RelayStateDirName</key>
 	<string>$(RELAY_STATE_DIR_NAME)</string>
+	<!-- Variant suffix (".dev"/"") the app uses to derive the IMK helper bundle id +
+	     CFMessagePort names (see IMKMessaging), matching the helper it ships. -->
+	<key>RelayVariantSuffix</key>
+	<string>$(RELAY_VARIANT_SUFFIX)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>

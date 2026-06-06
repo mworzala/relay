@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  RelayInputMethod Info.plist — the production IMK helper bundle (plan 08).
+  RelayInputMethod Info.plist — DEBUG / dev variant (bundle id
+  com.relay.inputmethod.RelayInputMethod.dev).
 
-  The IMK-specific keys are what make TSM treat this .app as a selectable input
-  source once it lives in ~/Library/Input Methods/. This structure is the one the
-  IMK spike (plan 06) empirically verified on macOS 26 (modeled on Apple's AinuIM
-  and Squirrel). Every key here is load-bearing — see the inline notes and §3 of
-  docs/plans/08-imk-production.md before changing anything.
+  Sibling of Info-Release.plist; keep the two in sync EXCEPT for the four bundle-id
+  occurrences below (connection name, the mode-id key, TISInputSourceID, and the
+  visible-mode array), which carry the ".dev" suffix here so the dev input source is
+  distinct from the installed one. Two files exist because the input-mode id is a
+  plist dictionary *key* and Xcode only expands build settings in values, not keys.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -22,9 +23,13 @@
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Relay</string>
+	<string>$(RELAY_DISPLAY_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!-- Variant suffix (".dev"/"") so the helper process derives the same suffixed
+	     CFMessagePort names the app uses — see IMKMessaging. -->
+	<key>RelayVariantSuffix</key>
+	<string>$(RELAY_VARIANT_SUFFIX)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
@@ -42,10 +47,10 @@
 	<!-- ===== Input Method Kit keys ===== -->
 
 	<!-- The Mach connection IMKServer registers. By convention
-	     $(PRODUCT_BUNDLE_IDENTIFIER)_Connection; main.swift reads this key back to
-	     create the server, and IMKMessaging.connectionName must match it. -->
+	     <bundleid>_Connection; main.swift reads this key back to create the server,
+	     and IMKMessaging.connectionName must match it. -->
 	<key>InputMethodConnectionName</key>
-	<string>com.relay.inputmethod.RelayInputMethod_Connection</string>
+	<string>com.relay.inputmethod.RelayInputMethod.dev_Connection</string>
 
 	<!-- The IMKInputController subclass TSM instantiates per input session. The
 	     bare class name works because the subclass is @objc(RelayInputMethodController). -->
@@ -60,10 +65,10 @@
 	<dict>
 		<key>tsInputModeListKey</key>
 		<dict>
-			<key>com.relay.inputmethod.RelayInputMethod</key>
+			<key>com.relay.inputmethod.RelayInputMethod.dev</key>
 			<dict>
 				<key>TISInputSourceID</key>
-				<string>com.relay.inputmethod.RelayInputMethod</string>
+				<string>com.relay.inputmethod.RelayInputMethod.dev</string>
 				<key>TISIntendedLanguage</key>
 				<string>en</string>
 				<key>tsInputModeAlternateMenuTitleStringKey</key>
@@ -86,7 +91,7 @@
 		</dict>
 		<key>tsVisibleInputModeOrderedArrayKey</key>
 		<array>
-			<string>com.relay.inputmethod.RelayInputMethod</string>
+			<string>com.relay.inputmethod.RelayInputMethod.dev</string>
 		</array>
 	</dict>
 </dict>

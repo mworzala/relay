@@ -6,9 +6,10 @@ CONFIG       := Debug
 PROJECT      := Relay.xcodeproj
 DERIVED      := build
 APP          := $(DERIVED)/Build/Products/$(CONFIG)/Relay.app
+RELEASE_APP  := $(DERIVED)/Build/Products/Release/Relay.app
 DEST         := platform=macOS,arch=arm64
 
-.PHONY: all generate build test run launch clean reset open xcode
+.PHONY: all generate build test run launch clean reset open xcode install
 
 all: build
 
@@ -35,6 +36,23 @@ test: generate
 		-destination '$(DEST)' \
 		-derivedDataPath $(DERIVED) \
 		test
+
+## install: build the RELEASE variant and install it to /Applications.
+## This is the "real" app (bundle id com.relay.Relay, "Relay", state dir Relay/) —
+## distinct from the Debug/dev build (com.relay.Relay.dev, "Relay Dev", Relay-Dev/),
+## so the two coexist without fighting over TCC grants or settings. Grant
+## Microphone + Accessibility to the installed copy on first launch.
+install: generate
+	xcodebuild \
+		-project $(PROJECT) \
+		-scheme $(SCHEME) \
+		-configuration Release \
+		-destination '$(DEST)' \
+		-derivedDataPath $(DERIVED) \
+		build
+	rm -rf /Applications/Relay.app
+	cp -R "$(RELEASE_APP)" /Applications/Relay.app
+	@echo "Installed /Applications/Relay.app (com.relay.Relay)."
 
 ## run: build then launch the app via Finder (detached; no console logs)
 run: build launch

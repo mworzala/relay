@@ -13,23 +13,39 @@ import Foundation
 /// kernel Mach call. The protocol is intentionally tiny and idempotent so a helper
 /// restart is survivable.
 nonisolated enum IMKMessaging {
+    /// Variant suffix (".dev" for the Debug/dev build, "" for Release/installed),
+    /// read from the bundle's `RelayVariantSuffix` Info.plist value (set per build
+    /// configuration). Every identity below is suffixed by it so the dev and
+    /// installed copies register **distinct** input sources and talk over **distinct**
+    /// CFMessagePort channels — they never cross-wire. Both the app and the helper
+    /// read it from their own bundles, so they compute identical names per variant.
+    private static let variantSuffix: String =
+        (Bundle.main.object(forInfoDictionaryKey: "RelayVariantSuffix") as? String) ?? ""
+
     /// The helper bundle id. MUST contain `.inputmethod.` as an interior label or
     /// the login-time input-source scanner silently ignores the bundle (gotcha §3).
-    static let helperBundleID = "com.relay.inputmethod.RelayInputMethod"
+    static let helperBundleID = "com.relay.inputmethod.RelayInputMethod" + variantSuffix
 
     /// The input *mode* id (its `TISInputSourceID`) — the selectable entry. Mirrors
     /// the bundle id, matching the verified spike's `ComponentInputModeDict`.
-    static let inputSourceID = "com.relay.inputmethod.RelayInputMethod"
+    static let inputSourceID = helperBundleID
 
     /// The `IMKServer` connection name. By convention `<bundleid>_Connection`; the
     /// helper's `Info.plist` `InputMethodConnectionName` reads back this exact value.
-    static let connectionName = "com.relay.inputmethod.RelayInputMethod_Connection"
+    static let connectionName = helperBundleID + "_Connection"
 
     /// CFMessagePort the **helper** vends and the app sends commands to.
-    static let toHelperPortName = "com.relay.inputmethod.RelayInputMethod.toHelper"
+    static let toHelperPortName = helperBundleID + ".toHelper"
 
     /// CFMessagePort the **app** vends and the helper sends events to.
-    static let toAppPortName = "com.relay.Relay.fromHelper"
+    static let toAppPortName = "com.relay.Relay" + variantSuffix + ".fromHelper"
+
+    /// Filename the helper is installed under in `~/Library/Input Methods/`. The
+    /// embedded payload keeps a stable name (`RelayInputMethod.app`, for the Xcode
+    /// copy phase), but it's installed under a variant-suffixed wrapper name so the
+    /// dev and installed copies don't overwrite each other there. TIS keys on the
+    /// bundle id inside, not the wrapper name, so renaming the wrapper is safe.
+    static let installedHelperAppName = "RelayInputMethod" + variantSuffix + ".app"
 
     /// App → helper commands. Raw values are the CFMessagePort `msgid`.
     enum Command: Int32 {

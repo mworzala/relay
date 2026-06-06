@@ -142,9 +142,15 @@ targets:
       - sdk: Carbon.framework
     settings:
       base:
+        # PRODUCT_NAME stays stable so the Relay target's embed (Copy Files) phase
+        # always finds "RelayInputMethod.app" in both configs. The two variants are
+        # kept from colliding at ~/Library/Input Methods/ by IMKInstaller copying to a
+        # variant-suffixed destination name instead.
         PRODUCT_NAME: RelayInputMethod
-        PRODUCT_BUNDLE_IDENTIFIER: com.relay.inputmethod.RelayInputMethod
-        INFOPLIST_FILE: Sources/InputMethod/Info.plist
+        # Per-variant bundle id so dev and installed are distinct input sources
+        # (distinct TISInputSourceID + ports). The `.inputmethod.` interior label is
+        # preserved (required by the login scanner).
+        PRODUCT_BUNDLE_IDENTIFIER: com.relay.inputmethod.RelayInputMethod$(RELAY_VARIANT_SUFFIX)
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         CODE_SIGN_STYLE: Manual
@@ -152,6 +158,13 @@ targets:
         DEVELOPMENT_TEAM: ""
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+      # The input-mode id is a plist dict KEY, which Xcode won't substitute, so the
+      # helper plist can't be templated — use one per configuration instead.
+      configs:
+        Debug:
+          INFOPLIST_FILE: Sources/InputMethod/Info-Debug.plist
+        Release:
+          INFOPLIST_FILE: Sources/InputMethod/Info-Release.plist
 
   # Unit tests for the pure logic (text diff, AX UTF-16 range math, prefix
   # unification). Hosted by the Relay app so `@testable import Relay` can reach
