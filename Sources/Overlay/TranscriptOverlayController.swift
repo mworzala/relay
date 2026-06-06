@@ -142,11 +142,17 @@ final class TranscriptOverlayController {
 
     private func fadeOut() {
         guard let panel else { return }
+        let gen = generation
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.22
             panel.animator().alphaValue = 0
-        }, completionHandler: { [weak panel] in
-            MainActor.assumeIsolated { panel?.orderOut(nil) }
+        }, completionHandler: { [weak self, weak panel] in
+            MainActor.assumeIsolated {
+                // Skip if a newer begin() re-displayed the panel during the fade
+                // (the generation token is already bumped by begin()/end()).
+                guard let self, self.generation == gen else { return }
+                panel?.orderOut(nil)
+            }
         })
     }
 
