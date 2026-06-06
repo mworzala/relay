@@ -66,6 +66,30 @@ nonisolated final class InjectionCoordinator: @unchecked Sendable {
         }
     }
 
+    /// Resolve the focused text element (running the same Electron/Chromium
+    /// manual-accessibility flip a real session would) and read the bounded caret
+    /// prefix + next char — **without** installing an injection strategy.
+    ///
+    /// Used by the IMK path: the input method does its own inserting, but reuses our
+    /// prefix unification so a new dictation reads naturally after the text a previous
+    /// one committed (spacing/capitalization across the seam). Runs off-main; the
+    /// completion fires on the coordinator's serial queue, so the caller hops to its
+    /// own actor. `prefix` is `nil` when no AX caret is readable → callers unify
+    /// against nil, i.e. insert verbatim (graceful no-op, today's IMK behavior).
+    func capturePrefix(completion: @escaping @Sendable (_ prefix: String?, _ nextChar: Character?, _ appName: String) -> Void) {
+        queue.async {
+            if IsSecureEventInputEnabled() { completion(nil, nil, self.frontmostName()); return }
+            let resolved = self.resolveTextTarget()
+            guard resolved.usable, let element = resolved.element else {
+                completion(nil, nil, resolved.appName)
+                return
+            }
+            let ctx = Self.readCaretContext(element: element)
+            self.trace("IMK prefix capture app=\(resolved.appName) caret=\(ctx.caret) prefixLen=\(ctx.prefix?.utf16.count ?? 0)")
+            completion(ctx.prefix, ctx.nextChar, resolved.appName)
+        }
+    }
+
     /// Unify the dictation with the frozen caret prefix (spacing/dedup/
     /// capitalization). Returns the dictation verbatim in keystroke/no-prefix mode,
     /// where `context.prefix` is nil.
@@ -89,7 +113,31 @@ nonisolated final class InjectionCoordinator: @unchecked Sendable {
             return
         }
 
-        // 2. Resolve the frontmost app up front — we need its pid for the
+        let r = resolveTextTarget()
+        if r.usable, let element = r.element, let identity = r.identity {
+            beginAX(element: element, identity: identity, appName: r.appName, manual: r.manual)
+        } else {
+            beginKeystroke(element: r.element, appName: r.appName, pid: r.pid, manual: r.manual)
+        }
+    }
+
+    /// The focused text element resolved for a session, with the metadata both the
+    /// injection strategies and the IMK prefix-capture need.
+    private struct ResolvedTarget {
+        var element: AXUIElement?
+        var identity: AXText.AppIdentity?
+        var appName: String
+        var manual: Bool
+        var usable: Bool
+        var pid: pid_t
+    }
+
+    /// Resolve the frontmost app's focused text element, coaxing Chromium/Electron
+    /// via the manual-accessibility flip when there's no usable element yet. Shared
+    /// by `startSession` (which then installs a strategy) and `capturePrefix` (which
+    /// only reads). Runs on `queue`; the manual-AX retry sleeps are off-main.
+    private func resolveTextTarget() -> ResolvedTarget {
+        // Resolve the frontmost app up front — we need its pid for the
         // manual-accessibility flip even when the focused element can't be resolved.
         // Electron/Chromium expose NO system-wide focused element until their AX
         // tree is built, which is exactly what the flip triggers.
@@ -105,7 +153,7 @@ nonisolated final class InjectionCoordinator: @unchecked Sendable {
         traceProbe("probe", element, appName: identity?.name ?? frontName,
                    bundleID: identity?.bundleID ?? front?.bundleIdentifier)
 
-        // 3. No usable focused text element (incl. nil)? Flip manual accessibility on
+        // No usable focused text element (incl. nil)? Flip manual accessibility on
         // the frontmost app — Chromium/Electron build their AX tree only after this,
         // and the keys are a harmless no-op elsewhere — then re-resolve the focused
         // element. The tree builds ASYNCHRONOUSLY, so retry over a short bounded
@@ -133,22 +181,27 @@ nonisolated final class InjectionCoordinator: @unchecked Sendable {
         }
 
         let appName = identity?.name ?? identity?.bundleID ?? frontName
-        if usable, let element, let identity {
-            beginAX(element: element, identity: identity, appName: appName, manual: manual)
-        } else {
-            beginKeystroke(element: element, appName: appName, pid: identity?.pid ?? frontPid, manual: manual)
-        }
+        return ResolvedTarget(element: element, identity: identity, appName: appName,
+                              manual: manual, usable: usable, pid: identity?.pid ?? frontPid)
     }
 
-    private func beginAX(element: AXUIElement, identity: AXText.AppIdentity, appName: String, manual: Bool) {
+    /// Read the bounded caret prefix + the char just past the caret/selection from a
+    /// resolved element. Shared by the AX strategy setup and the IMK prefix capture.
+    /// **Sensitive:** the prefix contents are never logged — only its length.
+    private static func readCaretContext(element: AXUIElement) -> (prefix: String?, nextChar: Character?, caret: Int) {
         let selection = AXText.selectedRange(of: element)
         let caret = selection?.location ?? (AXText.value(of: element)?.utf16.count ?? 0)
         // The prefix ends at the selection start; the next char is whatever survives
         // PAST the selection (its end), so dictate-over-selection reads the right
         // trailing char, not the soon-replaced first selected char.
         let caretEnd = selection.map { $0.location + $0.length } ?? caret
-        let prefix = Self.readPrefix(element: element, caret: caret)
-        let nextChar = Self.readNextChar(element: element, caret: caretEnd)
+        return (readPrefix(element: element, caret: caret),
+                readNextChar(element: element, caret: caretEnd),
+                caret)
+    }
+
+    private func beginAX(element: AXUIElement, identity: AXText.AppIdentity, appName: String, manual: Bool) {
+        let (prefix, nextChar, caret) = Self.readCaretContext(element: element)
         let prefixLength = prefix?.utf16.count ?? 0   // UTF-16, matching the read window
 
         let info = base(appName: appName, mode: .ax, manual: manual, prefixLength: prefixLength)

@@ -59,6 +59,12 @@ final class AppModel {
         dictation.onSessionStart = { [overlay] in overlay.show() }
         dictation.onSessionFinish = { [overlay] _ in overlay.hide() }
 
+        // Debug-only: surface the IMK insertion path in the diagnostics strip (the
+        // AX/keystroke coordinator never runs in IMK mode, so it can't report).
+        if RelayDebug.overlayEnabled {
+            dictation.onIMKDiagnostics = { [diagnostics] info in diagnostics.applyIMK(info) }
+        }
+
         // Wire the "Overlay + paste" transcript box.
         dictation.onTranscriptBegin = { [transcriptOverlay] in transcriptOverlay.begin() }
         dictation.onTranscriptUpdate = { [transcriptOverlay] confirmed, volatile in

@@ -54,6 +54,13 @@ final class DictationController {
     /// Resolved once at `beginDictation`: true when the IME engaged and bound a
     /// client, so this session streams through IMK instead of `sessionMode`.
     @ObservationIgnored private var sessionUsesIMK = false
+    /// Caret prefix + following char captured (off-main) at the start of an IMK
+    /// session, so IMK text is unified against the existing field content (spacing /
+    /// capitalization across the seam) exactly like the AX injector path. `nil` until
+    /// the async capture lands — early marked renders insert verbatim, then unify.
+    /// **Sensitive:** never log the prefix contents.
+    @ObservationIgnored private var imkPrefix: String?
+    @ObservationIgnored private var imkNextChar: Character?
 
     /// Hooks for later milestones (injection, overlay). Set by the app wiring.
     @ObservationIgnored var onSessionStart: (() -> Void)?
@@ -64,6 +71,10 @@ final class DictationController {
     @ObservationIgnored var onTranscriptBegin: (@MainActor () -> Void)?
     @ObservationIgnored var onTranscriptUpdate: (@MainActor (_ confirmed: String, _ volatile: String) -> Void)?
     @ObservationIgnored var onTranscriptEnd: (@MainActor () -> Void)?
+    /// Debug-only: push an IMK diagnostics snapshot to the overlay strip (wired to
+    /// `OverlayDiagnostics.applyIMK` by `AppModel`, only under `RelayDebug`). `nil`
+    /// in normal runs, so building the snapshot is skipped entirely.
+    @ObservationIgnored var onIMKDiagnostics: (@MainActor (IMKDebugInfo) -> Void)?
 
     init(settings: AppSettings, mic: MicrophoneCapture, asr: ASREngine,
          injector: InjectionCoordinator, paste: PasteInjector, imk: IMKController) {
@@ -167,7 +178,24 @@ final class DictationController {
         // the run loop briefly (the just-in-time focus-churn) — the overlay stays live.
         sessionUsesIMK = imk.beginDictationSession(targetPID: targetApp?.processIdentifier ?? 0)
 
-        if !sessionUsesIMK {
+        if sessionUsesIMK {
+            // The IME does the inserting, but we reuse the AX prefix-capture so this
+            // session unifies against whatever a previous one committed (a space and
+            // capital after the prior sentence's period). The capture is async (the
+            // Electron AX flip costs up to ~400ms); until it lands `imkPrefix` is nil
+            // and renders insert verbatim — the authoritative final commit on release
+            // unifies regardless, since the capture finishes well before then.
+            imkPrefix = nil
+            imkNextChar = nil
+            injector.capturePrefix { [weak self] prefix, nextChar, _ in
+                Task { @MainActor in
+                    guard let self, self.sessionUsesIMK else { return }
+                    self.imkPrefix = prefix
+                    self.imkNextChar = nextChar
+                    self.publishIMKDiagnostics(op: "prefix")
+                }
+            }
+        } else {
             switch sessionMode {
             case .typeDirectly:
                 injector.beginSession()
@@ -187,7 +215,7 @@ final class DictationController {
                 let preview = self.settings.injectUnconfirmedText
                     ? Self.joined(confirmed, volatile)
                     : confirmed
-                self.imk.renderMarked(preview)
+                self.imk.renderMarked(self.unifyForIMK(preview))
             } else {
                 switch self.sessionMode {
                 case .typeDirectly:
@@ -217,6 +245,9 @@ final class DictationController {
         // pre-roll; start now begins inference over that buffer + the live audio.
         streaming.start(manager: manager)
         onSessionStart?()
+        // Publish after `onSessionStart` (which calls overlay.show() → resets the
+        // strip) so the IMK indicator sticks; the async prefix capture updates it.
+        if sessionUsesIMK { publishIMKDiagnostics(op: "engaged") }
     }
 
     /// Tear down a session that armed (warmed the mic) but never started listening —
@@ -238,8 +269,12 @@ final class DictationController {
         if sessionUsesIMK {
             // Commit the authoritative final text through the IME (replaces the live
             // composition, ending it), then disengage (just-in-time restores the
-            // user's source). Empty text clears the composition.
-            imk.finishDictationSession(finalText: finalText)
+            // user's source). Empty text clears the composition. Unify against the
+            // captured prefix first so the committed sentence reads naturally after
+            // the existing field content (the capture has long since completed).
+            let unified = unifyForIMK(finalText)
+            publishIMKDiagnostics(op: unified.isEmpty ? "clear" : "commit")
+            imk.finishDictationSession(finalText: unified)
         } else {
             switch sessionMode {
             case .typeDirectly:
@@ -267,6 +302,30 @@ final class DictationController {
         sessionAppName = nil
         onSessionFinish?(finalText)
         phase = .idle
+    }
+
+    /// Unify IMK text against the captured caret prefix (spacing / dedup /
+    /// capitalization). Returns the text verbatim before the prefix capture lands
+    /// (`imkPrefix == nil`), matching the AX path's no-prefix behavior.
+    private func unifyForIMK(_ text: String) -> String {
+        PrefixUnifier.unify(prefix: imkPrefix, dictation: text, nextChar: imkNextChar)
+    }
+
+    /// Push an IMK diagnostics snapshot to the overlay strip (no-op unless the debug
+    /// hook is wired). The app name is the session's target; prefix length comes from
+    /// the captured prefix (0 until the async capture lands).
+    private func publishIMKDiagnostics(op: String) {
+        guard let onIMKDiagnostics else { return }
+        let engagement: String
+        switch settings.imkEngagementMode {
+        case .alwaysOn: engagement = "always-on"
+        case .justInTime: engagement = "just-in-time"
+        }
+        onIMKDiagnostics(IMKDebugInfo(
+            appName: sessionAppName ?? imk.boundAppBundleID ?? "—",
+            engagement: engagement,
+            prefixLength: imkPrefix?.utf16.count ?? 0,
+            lastOp: op))
     }
 
     /// Join the committed prefix and the volatile tail into the live target text.

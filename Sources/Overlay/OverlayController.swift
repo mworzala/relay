@@ -42,6 +42,7 @@ final class OverlayController {
         fadeIn(panel)
         if RelayDebug.overlayEnabled {
             diagnostics.resetInjection()   // don't flash the previous session's app
+            diagnostics.resetIMK()
             diagnostics.micName = micNameSource?()
             ensureDiagnosticsPanel()
             positionDiagnosticsPanel()
