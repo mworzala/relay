@@ -45,6 +45,26 @@ settings:
     SWIFT_OPTIMIZATION_LEVEL: "-Onone"
     COMBINE_HIDPI_IMAGES: YES
 
+  # --- Variant identity (dev vs installed coexistence) -------------------------
+  # A locally-built Debug copy and an installed Release copy run as DISTINCT apps
+  # so they don't fight over TCC grants, LaunchServices, settings, or the IMK
+  # input source. Everything that must differ keys off these per-configuration
+  # values (bundle ids, display name, state dir, IMK helper identity + ports):
+  #   Debug   → "…​.dev" ids, "Relay Dev" in the Dock, state in Relay-Dev/
+  #   Release → unsuffixed ids, "Relay", state in Relay/
+  # The model cache (AppPaths.models) is shared regardless, so dev never
+  # re-downloads Parakeet. Build settings can't be empty-string in YAML cleanly,
+  # so Release uses an explicit empty value via quoting.
+  configs:
+    Debug:
+      RELAY_VARIANT_SUFFIX: ".dev"
+      RELAY_DISPLAY_NAME: "Relay Dev"
+      RELAY_STATE_DIR_NAME: "Relay-Dev"
+    Release:
+      RELAY_VARIANT_SUFFIX: ""
+      RELAY_DISPLAY_NAME: "Relay"
+      RELAY_STATE_DIR_NAME: "Relay"
+
 packages:
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio.git
@@ -79,10 +99,12 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Relay
-        # TODO(bundle-id): change to your own reverse-DNS identifier. Keep it
-        # STABLE — ad-hoc signing already makes TCC grants fragile across rebuilds;
-        # a changing bundle id would drop permissions every time.
-        PRODUCT_BUNDLE_IDENTIFIER: com.relay.Relay
+        # Per-variant bundle id (see the `configs` block): com.relay.Relay (Release)
+        # vs com.relay.Relay.dev (Debug), so the installed and dev copies are
+        # distinct apps to TCC/LaunchServices. PRODUCT_NAME stays "Relay" for both so
+        # the .app/executable paths the Makefile uses don't change; the Dock name is
+        # differentiated via CFBundleDisplayName instead.
+        PRODUCT_BUNDLE_IDENTIFIER: com.relay.Relay$(RELAY_VARIANT_SUFFIX)
         INFOPLIST_FILE: Support/Info.plist
         CODE_SIGN_ENTITLEMENTS: Support/Relay.entitlements
         MARKETING_VERSION: "0.1.0"

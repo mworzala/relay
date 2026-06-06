@@ -21,9 +21,13 @@
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Relay</string>
+	<string>$(RELAY_DISPLAY_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!-- Per-variant state directory under Application Support (read by AppPaths) so
+	     a dev build and an installed build don't share settings/history. -->
+	<key>RelayStateDirName</key>
+	<string>$(RELAY_STATE_DIR_NAME)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
