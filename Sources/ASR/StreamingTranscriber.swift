@@ -122,27 +122,10 @@ final class StreamingTranscriber {
     /// last two hypotheses agree on; everything after is volatile.
     private func applyLocalAgreement(to text: String) {
         let curr = Self.words(text)
-
-        var agree = 0
-        let bound = min(prevWords.count, curr.count)
-        while agree < bound, prevWords[agree].lowercased() == curr[agree].lowercased() {
-            agree += 1
-        }
-
-        // Grow the committed prefix only, and only when consistent with what's
-        // already committed (so confirmed text never changes or shrinks).
-        if agree > confirmedWords.count {
-            let candidate = Array(curr.prefix(agree))
-            if confirmedWords.isEmpty || candidate.starts(with: confirmedWords) {
-                confirmedWords = candidate
-            }
-        }
-
-        let committedCount = confirmedWords.count
-        confirmed = confirmedWords.joined(separator: " ")
-        volatile = curr.count > committedCount
-            ? curr[committedCount...].joined(separator: " ")
-            : ""
+        let result = LocalAgreement.step(prev: prevWords, curr: curr, confirmed: confirmedWords)
+        confirmedWords = result.confirmed
+        confirmed = result.confirmed.joined(separator: " ")
+        volatile = result.volatile.joined(separator: " ")
         prevWords = curr
         onUpdate?(confirmed, volatile)
     }

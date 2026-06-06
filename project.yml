@@ -162,6 +162,7 @@ targets:
       - path: Sources/Shared/WordCount.swift   # shared word-split used by StreamingTranscriber
       - path: Sources/ASR/ParakeetModel.swift
       - path: Sources/ASR/StreamingTranscriber.swift
+      - path: Sources/ASR/LocalAgreement.swift   # pure commit rule used by StreamingTranscriber
       - path: Sources/Audio/AudioInputDevice.swift
       - path: Sources/Audio/CoreAudioDevices.swift
       - path: Sources/Audio/AudioLevelMeter.swift
