@@ -53,6 +53,10 @@ final class AudioCaptureEngine {
     func warm(deviceUID: String?) throws {
         if isRunning, deviceUID == currentDeviceUID { return }
         teardownSession()
+        // Clear the running flag up front: every throwing exit below (device not
+        // found, can't add input/output) must leave isRunning == false, not report a
+        // phantom warm session that owns nothing. The success path re-sets it true.
+        isRunning = false
 
         let device = deviceUID.flatMap { CaptureDeviceResolver.device(forUID: $0) }
             ?? AVCaptureDevice.default(for: .audio)
