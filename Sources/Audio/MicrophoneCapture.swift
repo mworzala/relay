@@ -32,9 +32,6 @@ final class MicrophoneCapture {
     /// Pending "cool the warm session" task (cancelled when a new dictation starts).
     @ObservationIgnored private var coolTask: Task<Void, Never>?
 
-    /// Whether the capture session is currently running (capturing or warm-idle).
-    var isWarm: Bool { engine.isRunning }
-
     init() {
         monitor.onDevicesChanged = { [weak self] in self?.handleDeviceChange() }
         engine.onConfigurationChange = { [weak self] in self?.handleConfigChange() }

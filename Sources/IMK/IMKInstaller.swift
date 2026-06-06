@@ -51,11 +51,6 @@ enum IMKInstaller {
         return boolProp(src, kTISPropertyInputSourceIsEnabled)
     }
 
-    static func isSelected() -> Bool {
-        guard let src = selectableSource() else { return false }
-        return boolProp(src, kTISPropertyInputSourceIsSelected)
-    }
-
     // MARK: - Install / uninstall
 
     /// Copy the embedded helper into `~/Library/Input Methods/` and register it.
