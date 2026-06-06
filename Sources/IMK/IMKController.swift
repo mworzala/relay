@@ -257,12 +257,13 @@ final class IMKController {
 
     /// Engage IMK for a dictation. Returns true if a client is bound and IMK will
     /// handle insertion; false → the caller falls back to the AX/paste path.
-    func beginDictationSession(targetPID: pid_t) -> Bool {
+    func beginDictationSession(targetPID: pid_t, targetBundleID: String) -> Bool {
         guard isAvailableForDictation else { return false }
         // Third-party IMEs are suspended in secure (password) fields — don't even try.
         guard !IsSecureEventInputEnabled() else { return false }
         IMKProcessManager.ensureRunning()
-        let bound = strategy.beginDictation(targetPID: targetPID, ipc: ipc, memory: memory)
+        let bound = strategy.beginDictation(targetPID: targetPID, targetBundleID: targetBundleID,
+                                            ipc: ipc, memory: memory)
         sessionActive = !bound.isEmpty
         if sessionActive { boundAppBundleID = bound }
         return sessionActive

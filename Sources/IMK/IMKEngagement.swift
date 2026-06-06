@@ -18,8 +18,10 @@ protocol IMKEngagement {
     /// Disengage globally when the feature is disabled.
     func deactivate(memory: IMKSourceMemory)
     /// Per-dictation engage. Returns the bound client's bundle id ("" = nothing
-    /// insertable bound → caller falls back to AX/paste).
-    func beginDictation(targetPID: pid_t, ipc: IMKMessagePortClient, memory: IMKSourceMemory) -> String
+    /// insertable bound → caller falls back to AX/paste). `targetBundleID` is the
+    /// app the dictation is aimed at, used to reject a stale always-on binding.
+    func beginDictation(targetPID: pid_t, targetBundleID: String,
+                        ipc: IMKMessagePortClient, memory: IMKSourceMemory) -> String
     /// Per-dictation end.
     func endDictation(ipc: IMKMessagePortClient, memory: IMKSourceMemory)
 }
@@ -46,8 +48,11 @@ struct AlwaysOnEngagement: IMKEngagement {
         memory.previous = nil
     }
 
-    func beginDictation(targetPID: pid_t, ipc: IMKMessagePortClient, memory: IMKSourceMemory) -> String {
-        ipc.request(.beginDictation, timeout: Self.beginTimeout) ?? ""
+    func beginDictation(targetPID: pid_t, targetBundleID: String,
+                        ipc: IMKMessagePortClient, memory: IMKSourceMemory) -> String {
+        // Pass the target bundle id so the helper can reject a stale binding to a
+        // previously-focused field (always-on does no focus-churn to refresh it).
+        ipc.request(.beginDictation, targetBundleID, timeout: Self.beginTimeout) ?? ""
     }
 
     func endDictation(ipc: IMKMessagePortClient, memory: IMKSourceMemory) {
@@ -73,7 +78,10 @@ struct JustInTimeEngagement: IMKEngagement {
         memory.previous = nil
     }
 
-    func beginDictation(targetPID: pid_t, ipc: IMKMessagePortClient, memory: IMKSourceMemory) -> String {
+    func beginDictation(targetPID: pid_t, targetBundleID: String,
+                        ipc: IMKMessagePortClient, memory: IMKSourceMemory) -> String {
+        // targetBundleID is unused here: the focus-churn forces the target app key and
+        // (re)binds the client fresh, so there's no stale-binding window to guard.
         memory.previous = IMKSwitcher.currentSource()
         guard IMKSwitcher.selectOurs() else { return "" }
         let bound = ipc.request(.engageJustInTime, String(targetPID), timeout: Self.engageTimeout) ?? ""

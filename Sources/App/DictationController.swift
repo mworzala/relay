@@ -176,7 +176,9 @@ final class DictationController {
         // release). Transparent fallback to the AX/paste path below when it can't
         // engage (not installed, no bound client, secure field). The engage may spin
         // the run loop briefly (the just-in-time focus-churn) — the overlay stays live.
-        sessionUsesIMK = imk.beginDictationSession(targetPID: targetApp?.processIdentifier ?? 0)
+        sessionUsesIMK = imk.beginDictationSession(
+            targetPID: targetApp?.processIdentifier ?? 0,
+            targetBundleID: targetApp?.bundleIdentifier ?? "")
 
         if sessionUsesIMK {
             // The IME does the inserting, but we reuse the AX prefix-capture so this
@@ -209,13 +211,21 @@ final class DictationController {
         streaming.onUpdate = { [weak self] confirmed, volatile in
             guard let self else { return }
             if self.sessionUsesIMK {
-                // Show the in-flight hypothesis as the live underlined composition in
-                // the field itself; honor "live unconfirmed text" (off → only the
-                // settled prefix is previewed). The final commit lands on release.
-                let preview = self.settings.injectUnconfirmedText
-                    ? Self.joined(confirmed, volatile)
-                    : confirmed
-                self.imk.renderMarked(self.unifyForIMK(preview))
+                // Re-check secure input every update: macOS suspends third-party IMEs
+                // over password fields, but if focus moved into one mid-session, stop
+                // rendering and cancel the composition rather than preview a password
+                // through the IME (mirrors the overlay-paste and AX paths).
+                if IsSecureEventInputEnabled() {
+                    self.imk.cancelDictationSession()
+                } else {
+                    // Show the in-flight hypothesis as the live underlined composition
+                    // in the field itself; honor "live unconfirmed text" (off → only the
+                    // settled prefix is previewed). The final commit lands on release.
+                    let preview = self.settings.injectUnconfirmedText
+                        ? Self.joined(confirmed, volatile)
+                        : confirmed
+                    self.imk.renderMarked(self.unifyForIMK(preview))
+                }
             } else {
                 switch self.sessionMode {
                 case .typeDirectly:

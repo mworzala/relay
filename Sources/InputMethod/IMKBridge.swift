@@ -52,8 +52,19 @@ nonisolated final class IMKBridge: @unchecked Sendable {
     /// when nothing insertable is bound (caller falls back to the AX/paste path).
     /// Only arms `dictating` when a client is actually bound, so a no-bind begin
     /// doesn't leave the helper stuck accepting (and dropping) later commands.
-    func beginDictation() -> String {
+    func beginDictation(expecting expectedBundleID: String = "") -> String {
         let bundle = controller?.clientBundleID() ?? ""
+        // Stale-bind guard (always-on, no focus-churn): boundClient is cleared only on
+        // a real TSM deactivateServer, so if focus moved to a non-text element or an
+        // app that didn't re-activate the IME, it can still point at the *previous*
+        // field. When the app tells us which app it's targeting and the bound client is
+        // a different app, treat the binding as stale and don't arm — the app falls
+        // back to AX/paste rather than risk setMarked/commit landing in the old field.
+        if !expectedBundleID.isEmpty, !bundle.isEmpty, bundle != expectedBundleID {
+            IMKLog.write("bridge: beginDictation stale bound=\(bundle) expected=\(expectedBundleID) — not arming")
+            dictating = false
+            return ""
+        }
         dictating = !bundle.isEmpty
         IMKLog.write("bridge: beginDictation bound=\(bundle.isEmpty ? "<none>" : bundle)")
         return bundle

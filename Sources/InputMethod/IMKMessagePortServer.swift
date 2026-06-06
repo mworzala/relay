@@ -78,7 +78,9 @@ nonisolated final class IMKMessagePortServer: @unchecked Sendable {
         case .ping:
             return reply("ok")
         case .beginDictation:
-            return reply(IMKBridge.shared.beginDictation())
+            // Payload (when present) is the app's target bundle id, used to reject a
+            // stale always-on binding to a previously-focused field.
+            return reply(IMKBridge.shared.beginDictation(expecting: payload))
         case .engageJustInTime:
             FocusChurn.perform(targetPID: pid_t(payload) ?? 0)
             return reply(IMKBridge.shared.beginDictation())
