@@ -27,6 +27,11 @@ final class OverlayController {
     @ObservationIgnored private var diagnosticsPanel: NSPanel?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var startDate: Date?
+    /// Bumped on every `show()`. A `fadeOut` captures it and only orders the panel
+    /// out if it still matches — so a rapid release-then-press re-dictation (the
+    /// reused panel re-shown mid-fade) isn't ordered out by the prior fade's
+    /// completion, which would leave the pill hidden (alpha 1) for the session.
+    @ObservationIgnored private var showGeneration = 0
 
     private static let panelSize = NSSize(width: 230, height: 60)
     private static let diagnosticsSize = NSSize(width: 560, height: 30)
@@ -34,6 +39,7 @@ final class OverlayController {
     private static let diagnosticsGap: CGFloat = 6
 
     func show() {
+        showGeneration &+= 1
         levels = Array(repeating: 0, count: Self.barCount)
         elapsed = 0
         startDate = Date()
@@ -118,12 +124,17 @@ final class OverlayController {
 
     private func fadeOut(_ panel: NSPanel?) {
         guard let panel else { return }
+        let gen = showGeneration
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.22
             panel.animator().alphaValue = 0
-        }, completionHandler: { [weak panel] in
+        }, completionHandler: { [weak self, weak panel] in
             // Completion fires on the main thread; assert it for the isolation checker.
-            MainActor.assumeIsolated { panel?.orderOut(nil) }
+            MainActor.assumeIsolated {
+                // Skip if a newer show() re-displayed the panel during the fade.
+                guard let self, self.showGeneration == gen else { return }
+                panel?.orderOut(nil)
+            }
         })
     }
 
