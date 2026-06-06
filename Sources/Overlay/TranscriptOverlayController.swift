@@ -114,13 +114,14 @@ final class TranscriptOverlayController {
         let size = panel.frame.size
 
         guard let caret = anchor else {
-            let visible = Self.activeScreen().frame
+            guard let visible = Self.activeScreen()?.frame else { return }
             panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2,
                                          y: visible.minY + 160))
             return
         }
 
-        let visible = (Self.screen(containing: caret) ?? Self.activeScreen()).visibleFrame
+        guard let visible = (Self.screen(containing: caret) ?? Self.activeScreen())?.visibleFrame
+        else { return }
         // Keep a full-width *card* (not the wider transparent panel) on screen
         // horizontally so a wide card is never clipped and a short one still sits
         // flush under the caret; vertically, place the bottom just above the caret
@@ -170,10 +171,12 @@ final class TranscriptOverlayController {
         NSScreen.screens.first { $0.frame.intersects(rect) }
     }
 
-    private static func activeScreen() -> NSScreen {
+    /// nil when no displays are attached (don't force `screens[0]`, which traps on
+    /// an empty array); callers skip positioning in that case.
+    private static func activeScreen() -> NSScreen? {
         let mouse = NSEvent.mouseLocation
         return NSScreen.screens.first { $0.frame.contains(mouse) }
             ?? NSScreen.main
-            ?? NSScreen.screens[0]
+            ?? NSScreen.screens.first
     }
 }

@@ -94,7 +94,9 @@ final class OverlayController {
 
     private func positionPanel() {
         guard let panel else { return }
-        let screen = Self.activeScreen()
+        // No attached displays (clamshell / display-sleep race): nothing to position
+        // onto — skip rather than crash. There's nothing visible to place anyway.
+        guard let screen = Self.activeScreen() else { return }
         let visible = screen.frame
         let size = panel.frame.size
         let origin = NSPoint(
@@ -105,12 +107,14 @@ final class OverlayController {
         NSLog("Relay overlay: frame=\(NSStringFromRect(panel.frame)) level=\(panel.level.rawValue) screen=\(NSStringFromRect(visible))")
     }
 
-    /// The screen currently under the mouse (best proxy for "where the user is").
-    private static func activeScreen() -> NSScreen {
+    /// The screen currently under the mouse (best proxy for "where the user is"),
+    /// or nil when no displays are attached (don't force `screens[0]`, which traps
+    /// on an empty array).
+    private static func activeScreen() -> NSScreen? {
         let mouse = NSEvent.mouseLocation
         return NSScreen.screens.first { $0.frame.contains(mouse) }
             ?? NSScreen.main
-            ?? NSScreen.screens[0]
+            ?? NSScreen.screens.first
     }
 
     private func fadeIn(_ panel: NSPanel?) {
