@@ -98,18 +98,23 @@ name works; `NSXPCConnection` with a named `NSXPCListener`/Mach service, or `CFM
   interim hypotheses as marked text, commit finalized phrases.)
 - Keep the protocol tiny and idempotent; tolerate the helper restarting.
 
-### 1d. Orchestration (switch-on-dictation)
+### 1d. Orchestration
 
-1. **PTT down** (IME mode enabled + installed): `IMKSwitcher` records the current source, selects
-   Relay's IME, runs the focus-churn so the focused app re-binds → helper `activateServer:` fires and
-   reports `engaged`.
-2. **ASR streams**: main app sends `setMarked(interim)` as hypotheses arrive, `commit(finalized)` as
-   phrases stabilize. Helper applies them to the client. Caret stays correct (Blink editor commit).
-3. **PTT up**: main app sends final `commit`, then `IMKSwitcher` restores the previous source.
-4. **Failure/secure-input/no client**: fall back to the existing AX/paste insertion path.
+**Primary — persistent IME (§2b), no per-dictation switch:**
+1. **On enable** (once): `IMKSwitcher` selects Relay's IME as the current source and leaves it. The
+   helper binds to whatever field the user focuses, via the user's *own* focus changes — no churn.
+2. **PTT down**: main app signals the helper "dictation on" over IPC; helper begins accepting
+   `setMarked`/`commit`. (No input-source switch, no flash.)
+3. **ASR streams**: `setMarked(interim)` as hypotheses arrive, `commit(finalized)` as phrases
+   stabilize → helper applies them to the already-bound client (correct caret, Blink commit).
+4. **PTT up**: final `commit`; helper returns to pure passthrough.
+5. **On disable**: `IMKSwitcher` restores the user's previous Roman source (free, no churn).
 
-Latency budget (measured in the spike): switch-in ≈ **180 ms**, switch-back ≈ **155 ms** — both fit
-behind the PTT/finalize windows.
+**Alternative — just-in-time switch (opt-in, has the menu-bar flash):** at PTT-down record the
+current source, `TISSelectInputSource(ours)` + focus-churn (§2) to engage, stream, then restore at
+PTT-up. Latency budget (measured in the spike): switch-in ≈ **180 ms**, switch-back ≈ **155 ms**.
+
+**Always:** on failure / secure-input / no bound client, fall back to the existing AX/paste path.
 
 ---
 
@@ -136,20 +141,71 @@ rebind** — tested on macOS 26, `activateServer:` never fired.
 menu bar** on switch-*in*. The switch-*back* to the user's Roman layout needs **no churn at all**, so
 it's free. Net: one brief menu-bar flicker when dictation starts.
 
-> **⏳ Blink-mitigation research (in progress).** A dedicated research workflow is evaluating
-> less-obvious ways to force the foreign-app rebind without the menu-bar flip (CPS/SkyLight key-focus
-> APIs, TSM/Carbon cross-process nudges, the built-in-Dictation mechanism, AX-focus rebind,
-> activation variants that don't take the menu bar, synthetic input-source-switch hotkeys, and an
-> always-on IME that gates dictation internally so no per-dictation switch is needed). **This section
-> will be updated with the recommended approach + ranked fallbacks before implementation starts.**
-> Until then, build against the macism focus-churn (it works) and keep `IMKSwitcher`'s engage step
-> behind one swappable function so the chosen technique drops in cleanly.
+> **✅ Blink-mitigation research — RESOLVED (a fully-invisible per-dictation switch is impossible).**
+> A dedicated research pass (45 techniques across CPS/SkyLight key-focus APIs, TSM/Carbon
+> cross-process nudges, the built-in-Dictation mechanism, AX-focus rebind, no-menu-bar activation
+> variants, synthetic hotkeys, and the always-on IME; 14 adversarially verified) concluded:
+>
+> **TSM binds an app's input context to the current IME lazily, on a real *frontmost-process*
+> transition (`SetFrontProcess`/CPS) — NOT on `TISSelectInputSource`, NOT on a WindowServer key-focus
+> change, NOT on any TSMDocument property reachable from another process. The menu bar mirrors the
+> frontmost process, so the transition that performs the rebind is the same one that flips the menu
+> bar — they are mechanically inseparable.** Therefore, for the **switch-on-dictation** model, the
+> menu-bar flip on switch-in is **unavoidable**. (All the clever escapes are verified dead ends — see
+> §2a. The only escapes from the flash are to *not switch* (§2b, recommended) or to *not use IMK*
+> (the existing AX path).)
 
-A promising **architectural** alternative the research is weighing: make Relay's IME the **persistent
-selected source** while the feature is on, and **gate dictation inside the controller** (pass through
-all normal typing, only insert when the main app signals an active dictation) — eliminating the
-per-dictation switch (and its flash) entirely. Tradeoff: the IME is the active source full-time while
-enabled. Decide based on the research outcome.
+### 2a. Verified dead ends (do NOT re-investigate)
+
+- **`.nonActivatingPanel` / CPS key-focus steal** (`_stealKeyFocusWithOptions:`) — invisible but
+  `activateServer:` never fires; TSM follows the frontmost *process*, not the WindowServer key-focus
+  stack. (Tested on-device in the spike — failed.)
+- **SLPS `SLPSPostEventRecordTo`-only flip** (yabai-style) — invisible XOR effective; yabai always
+  pairs it with `_SLPSSetFrontProcessWithOptions`, which flips the menu bar anyway. Private SkyLight,
+  version-fragile.
+- **TSM/Carbon doc APIs** (`FixTSMDocument`/`ActivateTSMDocument`/`NewTSMDocument` — `#if !__LP64__`,
+  don't compile on arm64; `TSMSetDocumentProperty` with an input-source override —
+  `TSMDocumentID` is process-local, no foreign-app handle; `UpdateActiveInputArea`/`SendTextInputEvent`
+  — caller's own session only; `TISSetInputMethodKeyboardLayoutOverride` — only sets the ASCII layout
+  of an already-current IME).
+- **`CGSSetSymbolicHotKey`** — only *registers* hotkeys; there is no call to *fire* one.
+- **Any AX action at the target** (set `kAXFocusedUIElement`, blur+refocus, AXRaise, post a
+  notification) — weaker than the already-failed panel; an AX focus write in Chromium doesn't move the
+  AppKit firstResponder, and you can't post AX notifications cross-process.
+- **A "system dictation insert" API** — does not exist. `SFSpeechRecognizer`/AssistantServices
+  recognize speech but do not insert text. Apple's built-in Dictation (`DictationIM.app`,
+  `com.apple.inputmethod.ironwood`) is a *hidden palette IME* that inserts via the **Accessibility
+  API** (`AXUIElementSetAttributeValue` + `AXEnhancedUserInterface`), not a hidden TSM rebind.
+
+### 2b. RECOMMENDED PRIMARY ARCHITECTURE — persistent always-on IME, gate dictation internally
+
+Because the per-dictation switch flash is unavoidable, the research's top recommendation (and the
+model every real macOS IME — Squirrel/Rime/azooKey — uses) is to **not switch per dictation at all**:
+
+- When the feature is enabled, select Relay's IME as the current source **once** and leave it active
+  full-time (the rebind then rides the **user's own ordinary focus changes** — no churn, **no flash,
+  no Accessibility**).
+- The controller returns `false` from `handle(_:client:)` for **all** ordinary keystrokes
+  (passthrough — verified in the spike), so typing is unaffected.
+- The existing global push-to-talk hotkey toggles "dictation mode" inside the controller; only then
+  does Relay drive `setMarkedText:`/`insertText:` on the **already-bound** client.
+
+**Tradeoffs (real, accept them consciously):** the menu shows "Relay" as the current input source
+full-time while enabled (the near-cursor HUD is suppressible via
+`defaults write -g TSMLanguageIndicatorEnabled 0`; the menu-bar title is not); **passthrough must be
+flawless** (bundle-id-gate behavior Squirrel-style); secure/password fields revert to Roman and
+bypass the IME (harmless); install is `~/Library/Input Methods/` so **Developer-ID/notarized only,
+never Mac App Store**.
+
+**Decision for implementation:** build **2b (persistent IME)** as the primary path — it directly
+solves the flash the user flagged and preserves the marked-text composition UX. Keep the §2
+focus-churn (`activate` mode) only as an opt-in "switch just-in-time" alternative for users who don't
+want Relay to be their full-time input source, and keep the existing **AX/paste path** as the
+non-IMK fallback. Isolate the engage step behind one swappable function regardless.
+
+> Full research report (ranked options, exact call sequences, sources) is reproduced in the spike's
+> `docs/imk-spike-findings.md` on the spike branch; the load-bearing conclusions are inlined above so
+> this plan stands alone on `main`.
 
 ---
 
