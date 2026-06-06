@@ -24,6 +24,7 @@ struct RelayApp: App {
                 .environment(model.asr)
                 .environment(model.mic)
                 .environment(model.dictation)
+                .environment(model.imk)
                 .task { await model.activate() }
         }
         .windowResizability(.contentMinSize)

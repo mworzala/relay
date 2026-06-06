@@ -21,6 +21,12 @@ final class AppSettings {
     /// Whether dictation types directly into the field (default) or streams into a
     /// caret-anchored overlay and pastes on release. See `InsertionMode`.
     var insertionMode: InsertionMode
+    /// Opt-in, experimental: route insertion through Relay's input method (better
+    /// Electron/Chromium support) when installed/engaged, falling back to the AX/paste
+    /// path otherwise. Off by default. See plan 08 / `IMKController`.
+    var imkEnabled: Bool
+    /// How the input method engages when `imkEnabled` is on. See `IMKEngagementMode`.
+    var imkEngagementMode: IMKEngagementMode
 
     /// The exact subset written to disk.
     private struct Snapshot: Codable {
@@ -28,8 +34,10 @@ final class AppSettings {
         var keybind: Keybind
         var launchAtLogin: Bool
         var firstRunComplete: Bool
-        var injectUnconfirmedText: Bool?   // added later; nil in old files → default on
-        var insertionMode: InsertionMode?  // added later; nil in old files → .typeDirectly
+        var injectUnconfirmedText: Bool?       // added later; nil in old files → default on
+        var insertionMode: InsertionMode?      // added later; nil in old files → .typeDirectly
+        var imkEnabled: Bool?                  // added later; nil in old files → false
+        var imkEngagementMode: IMKEngagementMode?  // added later; nil in old files → .alwaysOn
     }
 
     init() {
@@ -41,6 +49,8 @@ final class AppSettings {
             firstRunComplete = snap.firstRunComplete
             injectUnconfirmedText = snap.injectUnconfirmedText ?? true
             insertionMode = snap.insertionMode ?? .typeDirectly
+            imkEnabled = snap.imkEnabled ?? false
+            imkEngagementMode = snap.imkEngagementMode ?? .alwaysOn
         } else {
             micPriority = []
             keybind = .rightCommand
@@ -48,6 +58,8 @@ final class AppSettings {
             firstRunComplete = false
             injectUnconfirmedText = true
             insertionMode = .typeDirectly
+            imkEnabled = false
+            imkEngagementMode = .alwaysOn
         }
     }
 
@@ -60,7 +72,9 @@ final class AppSettings {
             launchAtLogin: launchAtLogin,
             firstRunComplete: firstRunComplete,
             injectUnconfirmedText: injectUnconfirmedText,
-            insertionMode: insertionMode
+            insertionMode: insertionMode,
+            imkEnabled: imkEnabled,
+            imkEngagementMode: imkEngagementMode
         )
         do {
             let encoder = JSONEncoder()

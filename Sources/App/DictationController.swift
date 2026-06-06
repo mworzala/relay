@@ -30,6 +30,10 @@ final class DictationController {
     private let injector: InjectionCoordinator
     /// Clipboard + ⌘V finalize for the `.overlayPaste` insertion mode.
     private let paste: PasteInjector
+    /// Optional input-method insertion path (plan 08). When enabled, installed, and a
+    /// client binds, dictation streams through the IME (marked text + final commit);
+    /// otherwise we fall through to the AX/paste path above.
+    private let imk: IMKController
 
     /// Hold this long before a press actually starts dictation, so quick taps /
     /// Right-Command combos don't trigger a session.
@@ -47,6 +51,9 @@ final class DictationController {
     /// Insertion mode resolved once at `beginDictation`, so toggling the setting
     /// mid-dictation can't reconfigure a live session.
     @ObservationIgnored private var sessionMode: InsertionMode = .typeDirectly
+    /// Resolved once at `beginDictation`: true when the IME engaged and bound a
+    /// client, so this session streams through IMK instead of `sessionMode`.
+    @ObservationIgnored private var sessionUsesIMK = false
 
     /// Hooks for later milestones (injection, overlay). Set by the app wiring.
     @ObservationIgnored var onSessionStart: (() -> Void)?
@@ -59,12 +66,13 @@ final class DictationController {
     @ObservationIgnored var onTranscriptEnd: (@MainActor () -> Void)?
 
     init(settings: AppSettings, mic: MicrophoneCapture, asr: ASREngine,
-         injector: InjectionCoordinator, paste: PasteInjector) {
+         injector: InjectionCoordinator, paste: PasteInjector, imk: IMKController) {
         self.settings = settings
         self.mic = mic
         self.asr = asr
         self.injector = injector
         self.paste = paste
+        self.imk = imk
         self.hotkey = HotkeyMonitor(keybind: settings.keybind)
     }
 
@@ -152,36 +160,55 @@ final class DictationController {
         // field, and we must never mirror a password into the overlay.
         sessionMode = settings.insertionMode
 
-        switch sessionMode {
-        case .typeDirectly:
-            injector.beginSession()
-        case .overlayPaste:
-            // Don't touch the field while streaming — the transcript lives in the
-            // overlay and lands via paste on release.
-            if !IsSecureEventInputEnabled() { onTranscriptBegin?() }
+        // Premium path: if the IME is enabled/installed and a client binds, stream
+        // through it (live underlined composition + a single authoritative commit on
+        // release). Transparent fallback to the AX/paste path below when it can't
+        // engage (not installed, no bound client, secure field). The engage may spin
+        // the run loop briefly (the just-in-time focus-churn) — the overlay stays live.
+        sessionUsesIMK = imk.beginDictationSession(targetPID: targetApp?.processIdentifier ?? 0)
+
+        if !sessionUsesIMK {
+            switch sessionMode {
+            case .typeDirectly:
+                injector.beginSession()
+            case .overlayPaste:
+                // Don't touch the field while streaming — the transcript lives in the
+                // overlay and lands via paste on release.
+                if !IsSecureEventInputEnabled() { onTranscriptBegin?() }
+            }
         }
 
         streaming.onUpdate = { [weak self] confirmed, volatile in
             guard let self else { return }
-            switch self.sessionMode {
-            case .typeDirectly:
-                // With "live unconfirmed text" on (default), inject confirmed + the
-                // volatile tail — responsive, but the tail may rewrite/backspace as
-                // it settles. Off injects only the committed prefix: it grows
-                // monotonically, so the field appends smoothly and never
-                // backspace-storms (the tail lands from the final pass on release).
-                let target = self.settings.injectUnconfirmedText
+            if self.sessionUsesIMK {
+                // Show the in-flight hypothesis as the live underlined composition in
+                // the field itself; honor "live unconfirmed text" (off → only the
+                // settled prefix is previewed). The final commit lands on release.
+                let preview = self.settings.injectUnconfirmedText
                     ? Self.joined(confirmed, volatile)
                     : confirmed
-                self.injector.render(target)
-            case .overlayPaste:
-                // Re-check secure input every update: if it turned on mid-session
-                // (focus moved into a password field), stop mirroring and hide the
-                // overlay rather than display the dictated password.
-                if IsSecureEventInputEnabled() {
-                    self.onTranscriptEnd?()
-                } else {
-                    self.onTranscriptUpdate?(confirmed, volatile)
+                self.imk.renderMarked(preview)
+            } else {
+                switch self.sessionMode {
+                case .typeDirectly:
+                    // With "live unconfirmed text" on (default), inject confirmed + the
+                    // volatile tail — responsive, but the tail may rewrite/backspace as
+                    // it settles. Off injects only the committed prefix: it grows
+                    // monotonically, so the field appends smoothly and never
+                    // backspace-storms (the tail lands from the final pass on release).
+                    let target = self.settings.injectUnconfirmedText
+                        ? Self.joined(confirmed, volatile)
+                        : confirmed
+                    self.injector.render(target)
+                case .overlayPaste:
+                    // Re-check secure input every update: if it turned on mid-session
+                    // (focus moved into a password field), stop mirroring and hide the
+                    // overlay rather than display the dictated password.
+                    if IsSecureEventInputEnabled() {
+                        self.onTranscriptEnd?()
+                    } else {
+                        self.onTranscriptUpdate?(confirmed, volatile)
+                    }
                 }
             }
             self.onHypothesis?(confirmed, volatile)
@@ -208,15 +235,22 @@ final class DictationController {
         // Authoritative full-buffer pass, then reconcile the on-screen text to it
         // (fixes any tail the streaming passes left wrong) and save to history.
         let finalText = await streaming.finish()
-        switch sessionMode {
-        case .typeDirectly:
-            injector.finalize(finalText)
-        case .overlayPaste:
-            // Paste the final text at the user's real caret (the field was never
-            // touched), then dismiss the overlay. PasteInjector no-ops under secure
-            // input and on empty text.
-            paste.paste(finalText)
-            onTranscriptEnd?()
+        if sessionUsesIMK {
+            // Commit the authoritative final text through the IME (replaces the live
+            // composition, ending it), then disengage (just-in-time restores the
+            // user's source). Empty text clears the composition.
+            imk.finishDictationSession(finalText: finalText)
+        } else {
+            switch sessionMode {
+            case .typeDirectly:
+                injector.finalize(finalText)
+            case .overlayPaste:
+                // Paste the final text at the user's real caret (the field was never
+                // touched), then dismiss the overlay. PasteInjector no-ops under secure
+                // input and on empty text.
+                paste.paste(finalText)
+                onTranscriptEnd?()
+            }
         }
         if !finalText.isEmpty {
             // Hold duration = start of dictation → now; the natural WPM denominator.

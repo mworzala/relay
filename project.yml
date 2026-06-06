@@ -58,10 +58,24 @@ targets:
     sources:
       - path: Sources
         excludes:
-          - "Probe/**"   # the headless diagnostic CLI is its own target
+          - "Probe/**"         # the headless diagnostic CLI is its own target
+          - "InputMethod/**"   # the IMK helper bundle is its own target (embedded below)
     dependencies:
       - package: FluidAudio
         product: FluidAudio
+      # Embed the IMK helper inside Relay.app so IMKInstaller can copy it out to
+      # ~/Library/Input Methods/ on demand. `link: false` (you don't link an .app),
+      # `embed` runs a Copy Files phase; `wrapper` + the subpath land it at
+      # Relay.app/Contents/Library/InputMethods/RelayInputMethod.app. Building the
+      # Relay scheme builds this dependency first. NOT wired into Relay's runtime —
+      # the installer treats it purely as a payload to copy.
+      - target: RelayInputMethod
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Library/InputMethods
     settings:
       base:
         PRODUCT_NAME: Relay
@@ -82,6 +96,40 @@ targets:
       testTargets:
         - RelayTests
       gatherCoverageData: false
+
+  # The production IMK input-method helper (plan 08). A minimal LSUIElement agent:
+  # an IMKServer + an IMKInputController that applies setMarkedText:/insertText:
+  # requests arriving over CFMessagePort from the main app, and passes through all
+  # ordinary typing. It carries no ASR/audio/UI. Built as a dependency of Relay
+  # and EMBEDDED inside Relay.app (see the Relay target's dependencies above);
+  # never installed until the user explicitly runs the in-app setup.
+  #
+  # The bundle id MUST contain `.inputmethod.` as an interior label or the
+  # login-time scanner of ~/Library/Input Methods refuses to classify it as an
+  # input method and TIS silently never registers it (verified against every Apple
+  # + third-party IME). It shares only IMKShared/IMKMessaging.swift with Relay.
+  RelayInputMethod:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Sources/InputMethod
+      - path: Sources/IMKShared/IMKMessaging.swift   # IPC verbs + port names, shared with Relay
+    dependencies:
+      - sdk: InputMethodKit.framework
+      - sdk: Carbon.framework
+    settings:
+      base:
+        PRODUCT_NAME: RelayInputMethod
+        PRODUCT_BUNDLE_IDENTIFIER: com.relay.inputmethod.RelayInputMethod
+        INFOPLIST_FILE: Sources/InputMethod/Info.plist
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
 
   # Unit tests for the pure logic (text diff, AX UTF-16 range math, prefix
   # unification). Hosted by the Relay app so `@testable import Relay` can reach

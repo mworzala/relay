@@ -15,6 +15,12 @@ final class AppModel {
     let overlay: OverlayController
     /// Caret-anchored live-transcript box for "Overlay + paste" mode.
     let transcriptOverlay: TranscriptOverlayController
+    /// Optional input-method insertion path + its install/lifecycle orchestration.
+    let imk: IMKController
+
+    /// Weak back-reference so the AppKit delegate (a separate object) can restore the
+    /// user's input source + stop the helper on quit. Mirrors `WindowReopener`.
+    static weak var shared: AppModel?
 
     init() {
         let settings = AppSettings()
@@ -22,12 +28,14 @@ final class AppModel {
         let mic = MicrophoneCapture()
         let overlay = OverlayController()
         let transcriptOverlay = TranscriptOverlayController()
+        let imk = IMKController(settings: settings)
 
         self.settings = settings
         self.asr = asr
         self.mic = mic
         self.overlay = overlay
         self.transcriptOverlay = transcriptOverlay
+        self.imk = imk
 
         // Injection: AX-primary coordinator with keystroke fallback. Under
         // RELAY_DEBUG the coordinator publishes each session's decision/op to the
@@ -39,8 +47,9 @@ final class AppModel {
         let injector = InjectionCoordinator(debugSink: debugSink)
         let paste = PasteInjector()
         self.dictation = DictationController(
-            settings: settings, mic: mic, asr: asr, injector: injector, paste: paste)
+            settings: settings, mic: mic, asr: asr, injector: injector, paste: paste, imk: imk)
 
+        AppModel.shared = self
         mic.priorityProvider = { [settings] in settings.micPriority }
 
         // Wire the dictation lifecycle to the floating pill (shown in both modes).
@@ -73,6 +82,9 @@ final class AppModel {
 
         mic.startMonitoring()
         dictation.activate()
+        // Bring the input method online if the user left it enabled (re-selects it
+        // for always-on, launches the helper, starts listening for engage events).
+        imk.start()
         if ParakeetModel.isDownloaded() {
             await asr.prepare()
         }

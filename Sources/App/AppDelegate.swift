@@ -9,6 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActivationPolicy.apply()
     }
 
+    /// On quit, restore the user's previous input source and stop the IME helper, so
+    /// an always-on IME doesn't linger as the active source after Relay is gone.
+    func applicationWillTerminate(_ notification: Notification) {
+        AppModel.shared?.imk.shutdown()
+    }
+
     /// Keep Relay alive in the background after the config window is closed so the
     /// global hold-to-talk hotkey stays active. There is intentionally no menu bar
     /// item; the app is reached again via the Dock (reopen) or relaunch.
