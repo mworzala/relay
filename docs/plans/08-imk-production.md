@@ -1,0 +1,270 @@
+# Plan 8 — Production IMK dictation input method (the Chromium/Electron insertion path)
+
+> **For the implementing agent.** Self-contained brief; you have **no memory** of the spike that
+> produced it and **this branch (`main`) does not contain the spike code**. Relay is a macOS 26
+> push-to-talk dictation app (Swift 6, Xcode 26 MainActor-by-default isolation, XcodeGen from
+> `project.yml`, ad-hoc signed / unsandboxed). Everything you need to avoid repeating the spike's
+> mistakes is in this doc — read **§3 (hard-won setup gotchas)** before writing any code.
+>
+> **Provenance.** A throwaway spike (plan 06, run on a separate branch) empirically proved that an
+> IMK `insertText:replacementRange:` commit **lands in Electron/Chromium (Claude desktop) and native
+> apps**, that live `setMarkedText:` composition renders (so streaming dictation with in-place
+> corrections works), that pass-through typing works, and that **no Accessibility permission** is
+> needed for the commit. This plan productionizes that result. The spike's per-app matrix, measured
+> latencies, and the full gotcha list are summarized below so this plan stands alone.
+
+## Goal
+
+Add IMK as an **optional, config-gated, app-managed** text-insertion path — the premium route for
+Chromium/Electron apps (Slack, VS Code, Discord, Claude desktop, Notion) where Relay's AX/paste path
+is unreliable. Specifically:
+
+- A **Settings toggle**: "Insert via input method (better Electron/Chromium support)" — **off by
+  default**, experimental.
+- When the user enables it and the keyboard isn't installed yet, show a **"Set up…" button** that
+  installs + registers + enables the bundled IME (with the consent prompt and any logout guidance).
+- **Relay manages the IMK server process itself** — launches it, keeps it alive during dictation,
+  terminates it when done/disabled. Nothing is installed until the user explicitly requests it.
+- During dictation: switch the input source to Relay's IME, stream ASR text in (interim as
+  marked/underlined text, finalized phrases committed), then switch the user's source back.
+- If the IME is not installed/enabled, **transparently fall back** to the existing AX/paste path.
+
+## Why
+
+IMK is the only insertion path that goes through the native `NSTextInputClient`/TSM channel Chromium
+implements for IME input (`insertText:` → Chromium `ImeCommitText()` → Blink editor). The spike
+confirmed the commit lands in Electron where AX writes are inert, with a correct caret and no
+Accessibility permission. It is also the only path that can show a **live composition preview**
+(underlined interim text that self-corrects before commit) — something paste/AX cannot do.
+
+## Non-goals / scope limits (do not scope-creep)
+
+- **Reads are NOT solved by IMK.** Chromium's `NSTextInputClient` caches only the current selection
+  and marked text — never the full field. A production EDIT/voice-command feature still needs the AX
+  `AXSelectedTextMarkerRange` path (plan 05). IMK here is an **insert / replace-around-caret** engine.
+- **Replacement of already-committed text** via a non-`NSNotFound` `replacementRange` needs
+  TSMDocumentAccess, which Chromium only partially implements — do NOT rely on it. Keep the in-flight
+  tail as *marked* text and only correct within the composition before committing.
+- **Secure input** (password fields) suspends third-party IMEs — expected no-op; fall back.
+- **Mac App Store build** can't ship this (sandbox forbids it) — same as the rest of Relay.
+
+---
+
+## 1. Architecture
+
+Three pieces:
+
+### 1a. The IME helper bundle — `RelayInputMethod.app` (new, separate target)
+
+A minimal IMK input method, **embedded inside Relay.app** and copied to `~/Library/Input Methods/`
+on setup. It is a background agent (`LSUIElement`) whose only job during dictation is to apply
+text-insertion events it receives from the main app to the currently-focused client.
+
+- **`IMKServer`** created at launch on the connection named **exactly**
+  `$(PRODUCT_BUNDLE_IDENTIFIER)_Connection`.
+- **`IMKInputController`** subclass (`@objc(...)`-named, `nonisolated` — see §3) that:
+  - on `activateServer:` records the current `IMKTextInput` client and notifies the main app it is
+    engaged;
+  - applies `setMarkedText:` / `insertText:` requests arriving over IPC (§1c) to that client;
+  - returns **`false`** from `handle(_:client:)` so normal typing passes through;
+  - on `deactivateServer:` clears the client and notifies the main app.
+- It carries **no ASR, no audio, no UI**. All dictation logic stays in the main app; the helper is a
+  thin insertion proxy. (It must be a separate bundle because macOS requires an input method to be
+  its own bundle in `~/Library/Input Methods/`.)
+
+### 1b. The main app — install/lifecycle/orchestration
+
+- **`IMKInstaller`** — copies the embedded `RelayInputMethod.app` to `~/Library/Input Methods/`,
+  `TISRegisterInputSource`, `TISEnableInputSource` (triggers the one-time consent prompt), verifies
+  it appears in the source list, and detects the "needs logout/login" case (§3.4). Also `uninstall`.
+- **`IMKProcessManager`** — **Relay owns the helper process lifecycle.** Launch the installed helper
+  (`NSWorkspace.openApplication` on the installed `.app`, or `Process`) when dictation-via-IME is
+  active; keep a handle; terminate it when the feature is disabled or the app quits. Do NOT rely
+  solely on TSM to spawn it. (TSM *will* also spawn it on selection; design the helper so a
+  Relay-launched instance and a TSM-launched instance don't fight — single IMKServer connection name,
+  and make IPC idempotent. Simplest: let Relay launch it and have the helper be a singleton via a
+  guard on the Mach service name.)
+- **`IMKSwitcher`** — `TISSelectInputSource(ours)` + the focus-churn to engage it (§2), records the
+  previous source, and restores it on dictation end (the restore needs **no** churn — see §2).
+
+### 1c. IPC between main app and helper
+
+The helper holds the active `IMKTextInput` client; the main app produces the text. Wire them with a
+**named Mach service** the helper vends and Relay connects to (both are unsandboxed, so a global Mach
+name works; `NSXPCConnection` with a named `NSXPCListener`/Mach service, or `CFMessagePort`).
+
+- Helper → app: `engaged(clientBundleID)`, `disengaged`.
+- App → helper: `setMarked(String)`, `commit(String)`, `clear`. (Mirror the spike demo: stream
+  interim hypotheses as marked text, commit finalized phrases.)
+- Keep the protocol tiny and idempotent; tolerate the helper restarting.
+
+### 1d. Orchestration (switch-on-dictation)
+
+1. **PTT down** (IME mode enabled + installed): `IMKSwitcher` records the current source, selects
+   Relay's IME, runs the focus-churn so the focused app re-binds → helper `activateServer:` fires and
+   reports `engaged`.
+2. **ASR streams**: main app sends `setMarked(interim)` as hypotheses arrive, `commit(finalized)` as
+   phrases stabilize. Helper applies them to the client. Caret stays correct (Blink editor commit).
+3. **PTT up**: main app sends final `commit`, then `IMKSwitcher` restores the previous source.
+4. **Failure/secure-input/no client**: fall back to the existing AX/paste insertion path.
+
+Latency budget (measured in the spike): switch-in ≈ **180 ms**, switch-back ≈ **155 ms** — both fit
+behind the PTT/finalize windows.
+
+---
+
+## 2. Activation — the one genuinely tricky part (READ THIS)
+
+`TISSelectInputSource()` only updates the **global** current-source record (the menu-bar HUD changes,
+`TISCopyCurrentKeyboardInputSource` agrees). It does **NOT** make the focused foreign app's TSM input
+context re-bind to the new IME — that happens only on a **real focus transition**. A windowless
+helper that just calls `TISSelectInputSource` will see the HUD change but the IME **never engages**
+(`activateServer:`/`handleEvent:` never fire; keystrokes stay on the old layout). This cost the spike
+many cycles — do not rediscover it.
+
+**Working mechanism (the "macism focus-churn"):** after `TISSelectInputSource(ours)`, momentarily
+make a tiny helper `.accessory` `NSApplication` active via `NSApp.activate(ignoringOtherApps:true)`
+with an **off-screen, alpha-0** window, settle ~150 ms, then hand focus back to the recorded target
+app (`NSRunningApplication.activate()`). That focus transition forces the rebind → `activateServer:`
+fires. Runs from a helper process; **no Accessibility permission**.
+
+**Known-invisible-but-DOESN'T-WORK (do not retry):** an off-screen alpha-0 `.nonActivatingPanel`
+becoming key (a WindowServer key-focus steal) is fully invisible but **does not trigger the TSM
+rebind** — tested on macOS 26, `activateServer:` never fired.
+
+**The residual UX cost:** the churn *window* is invisible, but the app activation briefly **flips the
+menu bar** on switch-*in*. The switch-*back* to the user's Roman layout needs **no churn at all**, so
+it's free. Net: one brief menu-bar flicker when dictation starts.
+
+> **⏳ Blink-mitigation research (in progress).** A dedicated research workflow is evaluating
+> less-obvious ways to force the foreign-app rebind without the menu-bar flip (CPS/SkyLight key-focus
+> APIs, TSM/Carbon cross-process nudges, the built-in-Dictation mechanism, AX-focus rebind,
+> activation variants that don't take the menu bar, synthetic input-source-switch hotkeys, and an
+> always-on IME that gates dictation internally so no per-dictation switch is needed). **This section
+> will be updated with the recommended approach + ranked fallbacks before implementation starts.**
+> Until then, build against the macism focus-churn (it works) and keep `IMKSwitcher`'s engage step
+> behind one swappable function so the chosen technique drops in cleanly.
+
+A promising **architectural** alternative the research is weighing: make Relay's IME the **persistent
+selected source** while the feature is on, and **gate dictation inside the controller** (pass through
+all normal typing, only insert when the main app signals an active dictation) — eliminating the
+per-dictation switch (and its flash) entirely. Tradeoff: the IME is the active source full-time while
+enabled. Decide based on the research outcome.
+
+---
+
+## 3. Hard-won setup gotchas (every one cost the spike real time — bake them in)
+
+1. **Bundle id MUST contain `.inputmethod.` as an interior label.** The login-time scanner of
+   `~/Library/Input Methods/` only classifies a bundle as an input method if its identifier has
+   `.inputmethod.` in the middle (e.g. `com.relay.inputmethod.RelayInputMethod`). Without it, TIS
+   **silently never registers it** — it won't appear anywhere, no error. Confirmed against every
+   Apple + third-party IME (Squirrel `im.rime.inputmethod.Squirrel`, azooKey
+   `dev.ensan.inputmethod.azooKeyMac`).
+
+2. **`Info.plist` keys (model on Apple's AinuIM):**
+   - `LSUIElement = true` (background agent, no Dock icon).
+   - `InputMethodConnectionName = $(PRODUCT_BUNDLE_IDENTIFIER)_Connection` (read it back at runtime
+     to create the `IMKServer`).
+   - `InputMethodServerControllerClass` = the controller class name. Because the class is
+     `@objc(RelayInputMethodController)`, the **bare** name works; if you DON'T use an explicit
+     `@objc(...)` name, you must use the module-qualified `$(PRODUCT_MODULE_NAME).Class`.
+   - `ComponentInputModeDict` → `tsInputModeListKey` → one mode dict whose key == its
+     `TISInputSourceID`, with `tsInputModeIsVisibleKey = true`, `tsInputModeScriptKey =
+     smUnicodeScript`, `TISIntendedLanguage = en`.
+   - **`tsVisibleInputModeOrderedArrayKey`** (NOT `tsVisibleInputModeOrderArray` — wrong name silently
+     yields zero visible modes and the whole source is dropped) listing the mode id.
+
+3. **An IMKit method registers TWO TIS entries** — a non-selectable container
+   (`TISTypeKeyboardInputMethodModeEnabled`) and the selectable input *mode* (`TISTypeKeyboardInputMode`).
+   For enable/select, target the entry with **`kTISPropertyInputSourceIsSelectCapable == true`**;
+   selecting the container returns **`-50` (paramErr)** and silently no-ops.
+
+4. **First registration usually needs logout/login** (or at least the mode enabled at login) before
+   TIS surfaces it. Mid-session `TISRegisterInputSource` returns `0` but will NOT surface a bundle
+   that was previously cached as invalid. The installer must detect "registered but not yet listed"
+   and tell the user to log out/in once. (A fresh, never-before-seen valid bundle id sidesteps a
+   poisoned cache.)
+
+5. **`NSLog` from a TSM-launched IME agent does NOT reliably reach the unified log**, and the agent
+   may have a confined `TMPDIR`. For diagnostics, log to a file under the user's home and/or a
+   dedicated `os_log` subsystem. (Production: keep a quiet debug log behind a flag.)
+
+6. **Swift 6 isolation:** the project is MainActor-by-default. `IMKInputController`'s ObjC
+   initializers are nonisolated, so the subclass must be declared **`nonisolated final class`** (or
+   you get "main actor-isolated initializer cannot override a nonisolated declaration"). TSM calls
+   the controller on the main thread regardless.
+
+7. **Activation is lazy/bind-on-focus** — see §2. Don't expect `activateServer:` from a bare
+   `TISSelectInputSource`.
+
+8. **Consent prompt:** "…wants to activate the third-party input method" appears once on the first
+   `TISEnableInputSource` and (in the spike) did not recur in-session after approval. The setup flow
+   must expect and explain it.
+
+---
+
+## 4. Build wiring
+
+- New XcodeGen target `RelayInputMethod` (type `application`, `LSUIElement`, ad-hoc signed like the
+  rest; `PRODUCT_BUNDLE_IDENTIFIER = com.relay.inputmethod.RelayInputMethod`, its own
+  `Info.plist`). Keep its sources isolated (e.g. `Sources/InputMethod/**`, excluded from the `Relay`
+  target glob).
+- **Embed** the built `RelayInputMethod.app` inside `Relay.app` (a Copy Files build phase into e.g.
+  `Contents/Library/InputMethods/` or `Contents/Resources/`) so the installer can copy it out on
+  demand. The IME target builds as a dependency of `Relay` for embedding, but is NOT otherwise wired
+  into the app's runtime.
+- Shared insertion/diff/IPC code can live in a small framework or be compiled into both targets.
+
+---
+
+## 5. Settings / UX flow
+
+- Settings section (under the existing Config UI): a toggle **"Insert via input method (better
+  Electron/Chromium support) — experimental"**, default **off**.
+- State machine for the row:
+  - **Not installed** → toggle reveals a **"Set up…"** button. Tapping it runs `IMKInstaller`
+    (copy → register → enable), shows the consent prompt, and — if TIS doesn't list it yet — shows
+    "Log out and back in once to finish setup."
+  - **Installed + enabled** → toggle simply turns IME insertion on/off; Relay launches/terminates the
+    helper accordingly.
+  - **"Remove"** affordance → `uninstall` (disable source, remove the bundle from
+    `~/Library/Input Methods/`, terminate the helper) + note that a logout fully purges it.
+- Never install or register anything until the user taps **Set up**.
+
+---
+
+## 6. Verification
+
+- `make build` builds both `Relay` and `RelayInputMethod`; the IME embeds into `Relay.app`.
+- Setup from the UI installs + enables; the source appears in System Settings ▸ Keyboard ▸ Input
+  Sources.
+- With the feature on, a push-to-talk dictation into **Notes** (native) and **Claude desktop /
+  VS Code / Slack** (Electron) inserts text with a correct caret; interim text shows underlined and
+  finalizes cleanly; the user's previous input source is restored afterward.
+- Disabling the feature terminates the helper and stops switching; the AX/paste path still works.
+- Secure (password) field → falls back, no hang.
+
+## 7. Risks
+
+- **Distribution signing/notarization:** for a Developer ID build the embedded IME bundle must be
+  signed and notarized as part of Relay (deep-sign the nested `.app`); the consent prompt and the
+  logout-on-first-install remain. (Ad-hoc/dev builds work as-is.)
+- **TSM vs Relay-launched helper** both spawning the bundle — keep the IMKServer connection name
+  canonical and the IPC idempotent; prefer Relay as the single launcher.
+- **The menu-bar flash** on switch-in (pending the §2 research) — may ship as-is if research finds no
+  invisible rebind; the always-on-IME architecture is the escape hatch.
+- **macOS version drift** in the Chromium `NSTextInputClient` behavior — pin expectations and re-test
+  per major Chrome/Electron bump.
+
+## 8. Acceptance criteria
+
+- [ ] `RelayInputMethod.app` builds, embeds in `Relay.app`, and installs only on explicit user
+      action; commits via `insertText:` and passes through keystrokes.
+- [ ] Settings toggle + "Set up…" flow (install/register/enable/consent/logout-guidance) and a remove
+      path.
+- [ ] Relay launches/keeps-alive/terminates the helper process itself; IPC streams marked/commit
+      events from ASR to the helper.
+- [ ] Switch-on-dictation works end-to-end in at least one native and one Electron app, restoring the
+      previous source afterward; transparent fallback when not installed/enabled or in secure fields.
+- [ ] All §3 gotchas honored; builds cleanly.
