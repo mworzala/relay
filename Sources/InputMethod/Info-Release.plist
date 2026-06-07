@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   RelayInputMethod Info.plist — RELEASE / installed variant (bundle id
-  com.relay.inputmethod.RelayInputMethod).
+  com.mattworzala.inputmethod.RelayInputMethod).
 
   There are TWO copies of this plist, one per build configuration
   (Info-Release.plist / Info-Debug.plist), because the input-mode id is a plist
@@ -53,7 +53,7 @@
 	     <bundleid>_Connection; main.swift reads this key back to create the server,
 	     and IMKMessaging.connectionName must match it. -->
 	<key>InputMethodConnectionName</key>
-	<string>com.relay.inputmethod.RelayInputMethod_Connection</string>
+	<string>com.mattworzala.inputmethod.RelayInputMethod_Connection</string>
 
 	<!-- The IMKInputController subclass TSM instantiates per input session. The
 	     bare class name works because the subclass is @objc(RelayInputMethodController). -->
@@ -68,10 +68,10 @@
 	<dict>
 		<key>tsInputModeListKey</key>
 		<dict>
-			<key>com.relay.inputmethod.RelayInputMethod</key>
+			<key>com.mattworzala.inputmethod.RelayInputMethod</key>
 			<dict>
 				<key>TISInputSourceID</key>
-				<string>com.relay.inputmethod.RelayInputMethod</string>
+				<string>com.mattworzala.inputmethod.RelayInputMethod</string>
 				<key>TISIntendedLanguage</key>
 				<string>en</string>
 				<key>tsInputModeAlternateMenuTitleStringKey</key>
@@ -94,7 +94,7 @@
 		</dict>
 		<key>tsVisibleInputModeOrderedArrayKey</key>
 		<array>
-			<string>com.relay.inputmethod.RelayInputMethod</string>
+			<string>com.mattworzala.inputmethod.RelayInputMethod</string>
 		</array>
 	</dict>
 </dict>

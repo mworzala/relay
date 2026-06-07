@@ -38,8 +38,8 @@ test: generate
 		test
 
 ## install: build the RELEASE variant and install it to /Applications.
-## This is the "real" app (bundle id com.relay.Relay, "Relay", state dir Relay/) —
-## distinct from the Debug/dev build (com.relay.Relay.dev, "Relay Dev", Relay-Dev/),
+## This is the "real" app (bundle id com.mattworzala.Relay, "Relay", state dir Relay/) —
+## distinct from the Debug/dev build (com.mattworzala.Relay.dev, "Relay Dev", Relay-Dev/),
 ## so the two coexist without fighting over TCC grants or settings. Grant
 ## Microphone + Accessibility to the installed copy on first launch.
 install: generate
@@ -52,7 +52,7 @@ install: generate
 		build
 	rm -rf /Applications/Relay.app
 	cp -R "$(RELEASE_APP)" /Applications/Relay.app
-	@echo "Installed /Applications/Relay.app (com.relay.Relay)."
+	@echo "Installed /Applications/Relay.app (com.mattworzala.Relay)."
 
 ## run: build then launch the app via Finder (detached; no console logs)
 run: build launch

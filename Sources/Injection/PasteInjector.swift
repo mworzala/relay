@@ -22,7 +22,7 @@ import Foundation
 /// `NSPasteboard`, and a graceful quit landing inside the sub-second window is
 /// negligible — so it's accepted rather than guarded.
 nonisolated final class PasteInjector: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.relay.paste-injector")
+    private let queue = DispatchQueue(label: "com.mattworzala.paste-injector")
 
     /// How long to give the target to consume the paste before restoring the prior
     /// clipboard. A ⌘V is a *read*, which doesn't bump `changeCount`, so we can't

@@ -10,7 +10,7 @@ nonisolated final class PasteboardSnapshotTests: XCTestCase {
 
     /// A fresh private pasteboard per test, emptied on teardown.
     private func makePasteboard(_ name: String) -> NSPasteboard {
-        let pb = NSPasteboard(name: NSPasteboard.Name("com.relay.tests.\(name)"))
+        let pb = NSPasteboard(name: NSPasteboard.Name("com.mattworzala.tests.\(name)"))
         pb.clearContents()
         return pb
     }

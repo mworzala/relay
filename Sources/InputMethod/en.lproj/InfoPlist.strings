@@ -1,0 +1,14 @@
+/* Localized name shown for the Relay input source in the macOS input menu and in
+   System Settings ▸ Keyboard ▸ Input Sources.
+
+   macOS resolves an input mode's display name by looking up its input-mode id
+   (its TISInputSourceID — the ComponentInputModeDict key) as a key in this table.
+   With no entry it falls back to showing the raw id (e.g.
+   "com.mattworzala.inputmethod.RelayInputMethod"), which is the ugly "full group
+   and name" the user sees. Both build variants' mode ids are listed so the
+   installed (Release) and dev (Debug) copies each get a clean name.
+
+   Mechanism modeled on Apple's NumberInput IMKit sample (see TN2128). */
+
+"com.mattworzala.inputmethod.RelayInputMethod" = "Relay";
+"com.mattworzala.inputmethod.RelayInputMethod.dev" = "Relay Dev";

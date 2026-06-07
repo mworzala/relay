@@ -19,7 +19,7 @@ import Foundation
 /// all mutable state is confined to `queue` (so it must NOT inherit the project's
 /// MainActor-by-default isolation).
 nonisolated final class KeystrokeTextInjector: TextInjecting, @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.relay.text-injector")
+    private let queue = DispatchQueue(label: "com.mattworzala.text-injector")
     private let source = CGEventSource(stateID: .hidSystemState)
 
     private static let deleteKey: CGKeyCode = 51   // Backspace/Delete

@@ -6,13 +6,13 @@ import os
 /// agent may run with a redirected `TMPDIR`, so we write to an absolute path in the
 /// user's home (we are unsandboxed) AND emit to a dedicated `os_log` subsystem,
 /// queryable with:
-///   log show --last 5m --predicate 'subsystem == "com.relay.inputmethod"' --info
+///   log show --last 5m --predicate 'subsystem == "com.mattworzala.inputmethod"' --info
 ///
 /// Quiet by default; set `RELAY_IMK_DEBUG=1` in the helper's environment to also
 /// append to `~/relay-inputmethod.log`. (os_log is always emitted — it's cheap and
 /// off unless someone is watching.)
 nonisolated enum IMKLog {
-    static let oslog = OSLog(subsystem: "com.relay.inputmethod", category: "helper")
+    static let oslog = OSLog(subsystem: "com.mattworzala.inputmethod", category: "helper")
     static let path = NSHomeDirectory() + "/relay-inputmethod.log"
     static let fileEnabled = ProcessInfo.processInfo.environment["RELAY_IMK_DEBUG"] == "1"
 

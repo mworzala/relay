@@ -15,7 +15,7 @@ final class AudioDeviceMonitor {
 
     @ObservationIgnored private var listenerBlock: AudioObjectPropertyListenerBlock?
     @ObservationIgnored private let listenerQueue =
-        DispatchQueue(label: "com.relay.audio.device-listener")
+        DispatchQueue(label: "com.mattworzala.audio.device-listener")
 
     init() {
         connectedDevices = CoreAudioDevices.inputDevices()

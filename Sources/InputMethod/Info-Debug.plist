@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   RelayInputMethod Info.plist — DEBUG / dev variant (bundle id
-  com.relay.inputmethod.RelayInputMethod.dev).
+  com.mattworzala.inputmethod.RelayInputMethod.dev).
 
   Sibling of Info-Release.plist; keep the two in sync EXCEPT for the four bundle-id
   occurrences below (connection name, the mode-id key, TISInputSourceID, and the
@@ -50,7 +50,7 @@
 	     <bundleid>_Connection; main.swift reads this key back to create the server,
 	     and IMKMessaging.connectionName must match it. -->
 	<key>InputMethodConnectionName</key>
-	<string>com.relay.inputmethod.RelayInputMethod.dev_Connection</string>
+	<string>com.mattworzala.inputmethod.RelayInputMethod.dev_Connection</string>
 
 	<!-- The IMKInputController subclass TSM instantiates per input session. The
 	     bare class name works because the subclass is @objc(RelayInputMethodController). -->
@@ -65,10 +65,10 @@
 	<dict>
 		<key>tsInputModeListKey</key>
 		<dict>
-			<key>com.relay.inputmethod.RelayInputMethod.dev</key>
+			<key>com.mattworzala.inputmethod.RelayInputMethod.dev</key>
 			<dict>
 				<key>TISInputSourceID</key>
-				<string>com.relay.inputmethod.RelayInputMethod.dev</string>
+				<string>com.mattworzala.inputmethod.RelayInputMethod.dev</string>
 				<key>TISIntendedLanguage</key>
 				<string>en</string>
 				<key>tsInputModeAlternateMenuTitleStringKey</key>
@@ -91,7 +91,7 @@
 		</dict>
 		<key>tsVisibleInputModeOrderedArrayKey</key>
 		<array>
-			<string>com.relay.inputmethod.RelayInputMethod.dev</string>
+			<string>com.mattworzala.inputmethod.RelayInputMethod.dev</string>
 		</array>
 	</dict>
 </dict>

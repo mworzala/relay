@@ -19,7 +19,7 @@ final class TranscriptOverlayController {
     /// The resolved caret anchor in AppKit space (nil → bottom-center fallback).
     @ObservationIgnored private var anchor: NSRect?
     /// Serial off-main queue for the (potentially blocking) AX caret query.
-    @ObservationIgnored private let locateQueue = DispatchQueue(label: "com.relay.caret-locator")
+    @ObservationIgnored private let locateQueue = DispatchQueue(label: "com.mattworzala.caret-locator")
     /// Generation token so a stale async caret result from a previous session can't
     /// reposition a newer one.
     @ObservationIgnored private var generation = 0

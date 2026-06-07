@@ -35,7 +35,7 @@ nonisolated final class IMKMessagePortClient: @unchecked Sendable {
     /// A private run-loop mode for reply waits — nothing else is registered in it,
     /// so the wait never re-enters other sources. (A `String`; bridged to `CFString`
     /// at the call site so it stays `Sendable` as a static.)
-    private static let replyMode = "com.relay.imk.reply"
+    private static let replyMode = "com.mattworzala.imk.reply"
 
     // MARK: - Outbound (app → helper)
 

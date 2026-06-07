@@ -24,7 +24,7 @@ nonisolated enum IMKMessaging {
 
     /// The helper bundle id. MUST contain `.inputmethod.` as an interior label or
     /// the login-time input-source scanner silently ignores the bundle (gotcha §3).
-    static let helperBundleID = "com.relay.inputmethod.RelayInputMethod" + variantSuffix
+    static let helperBundleID = "com.mattworzala.inputmethod.RelayInputMethod" + variantSuffix
 
     /// The input *mode* id (its `TISInputSourceID`) — the selectable entry. Mirrors
     /// the bundle id, matching the verified spike's `ComponentInputModeDict`.
@@ -38,7 +38,7 @@ nonisolated enum IMKMessaging {
     static let toHelperPortName = helperBundleID + ".toHelper"
 
     /// CFMessagePort the **app** vends and the helper sends events to.
-    static let toAppPortName = "com.relay.Relay" + variantSuffix + ".fromHelper"
+    static let toAppPortName = "com.mattworzala.Relay" + variantSuffix + ".fromHelper"
 
     /// Filename the helper is installed under in `~/Library/Input Methods/`. The
     /// embedded payload keeps a stable name (`RelayInputMethod.app`, for the Xcode

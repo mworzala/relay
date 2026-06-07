@@ -21,7 +21,7 @@ import Foundation
 ///
 /// `nonisolated` + `@unchecked Sendable`: lives off-main; all state on `queue`.
 nonisolated final class AXTextInjector: TextInjecting, @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.relay.ax-injector")
+    private let queue = DispatchQueue(label: "com.mattworzala.ax-injector")
 
     private enum WriteMode: String { case selectedText, value }
 

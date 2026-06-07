@@ -14,7 +14,7 @@ import Foundation
 /// `nonisolated` + `@unchecked Sendable`: AX probing and forwarding run off-main
 /// on a single serial `queue`.
 nonisolated final class InjectionCoordinator: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.relay.injection-coordinator")
+    private let queue = DispatchQueue(label: "com.mattworzala.injection-coordinator")
     private let ax = AXTextInjector()
     private let keystroke = KeystrokeTextInjector()
     private let debugSink: (@Sendable (InjectionDebugInfo) -> Void)?

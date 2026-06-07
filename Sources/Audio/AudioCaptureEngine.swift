@@ -38,7 +38,7 @@ final class AudioCaptureEngine {
 
     @ObservationIgnored private var session: AVCaptureSession?
     @ObservationIgnored private var sessionObservers: [NSObjectProtocol] = []
-    @ObservationIgnored private let sampleQueue = DispatchQueue(label: "com.relay.audio.capture")
+    @ObservationIgnored private let sampleQueue = DispatchQueue(label: "com.mattworzala.audio.capture")
     @ObservationIgnored private let delegate = SampleDelegate()
     /// The device the running session was built for, so `warm` can no-op when
     /// already warm on the right device and rebuild when it changes.

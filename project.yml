@@ -10,7 +10,7 @@
 name: Relay
 
 options:
-  bundleIdPrefix: com.relay
+  bundleIdPrefix: com.mattworzala
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
@@ -99,12 +99,12 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Relay
-        # Per-variant bundle id (see the `configs` block): com.relay.Relay (Release)
-        # vs com.relay.Relay.dev (Debug), so the installed and dev copies are
+        # Per-variant bundle id (see the `configs` block): com.mattworzala.Relay (Release)
+        # vs com.mattworzala.Relay.dev (Debug), so the installed and dev copies are
         # distinct apps to TCC/LaunchServices. PRODUCT_NAME stays "Relay" for both so
         # the .app/executable paths the Makefile uses don't change; the Dock name is
         # differentiated via CFBundleDisplayName instead.
-        PRODUCT_BUNDLE_IDENTIFIER: com.relay.Relay$(RELAY_VARIANT_SUFFIX)
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattworzala.Relay$(RELAY_VARIANT_SUFFIX)
         INFOPLIST_FILE: Support/Info.plist
         CODE_SIGN_ENTITLEMENTS: Support/Relay.entitlements
         MARKETING_VERSION: "0.1.0"
@@ -150,7 +150,7 @@ targets:
         # Per-variant bundle id so dev and installed are distinct input sources
         # (distinct TISInputSourceID + ports). The `.inputmethod.` interior label is
         # preserved (required by the login scanner).
-        PRODUCT_BUNDLE_IDENTIFIER: com.relay.inputmethod.RelayInputMethod$(RELAY_VARIANT_SUFFIX)
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattworzala.inputmethod.RelayInputMethod$(RELAY_VARIANT_SUFFIX)
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         CODE_SIGN_STYLE: Manual
@@ -179,7 +179,7 @@ targets:
       - target: Relay
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.relay.Relay.Tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattworzala.Relay.Tests
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
@@ -213,6 +213,6 @@ targets:
     settings:
       base:
         PRODUCT_NAME: relay-asr-probe
-        PRODUCT_BUNDLE_IDENTIFIER: com.relay.Relay.asr-probe
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattworzala.Relay.asr-probe
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
