@@ -18,12 +18,23 @@ import FluidAudio
 @MainActor
 @Observable
 final class StreamingTranscriber {
+    /// The locked, strictly-growing committed prefix: once a word lands here it never
+    /// shrinks or rewrites. "Off" mode (inject only settled text) appends this so the
+    /// field never backspace-storms, and the probe checks it for regressions.
+    private(set) var committed = ""
+    /// A **coherent** live split of the *current* hypothesis: `confirmed` + `volatile`
+    /// always equals the model's latest full transcription (`curr`). `confirmed` is the
+    /// leading part curr still agrees with the locked prefix on; `volatile` is the rest.
+    /// This is what the live preview shows. Crucially it is NOT `committed` + tail —
+    /// when Parakeet revises an already-committed word as more right-context arrives,
+    /// the locked tail and the revised tail would otherwise both appear, duplicating
+    /// text in the preview ("…weird duplication weird duplication…").
     private(set) var confirmed = ""
     private(set) var volatile = ""
     private(set) var isStreaming = false
 
     @ObservationIgnored
-    var onUpdate: (@MainActor (_ confirmed: String, _ volatile: String) -> Void)?
+    var onUpdate: (@MainActor (_ committed: String, _ confirmed: String, _ volatile: String) -> Void)?
 
     @ObservationIgnored private var manager: AsrManager?
     @ObservationIgnored private var language: Language?
@@ -51,6 +62,7 @@ final class StreamingTranscriber {
         samples = []
         prevWords = []
         confirmedWords = []
+        committed = ""
         confirmed = ""
         volatile = ""
         accepting = true
@@ -63,6 +75,7 @@ final class StreamingTranscriber {
         accepting = false
         prevWords = []
         confirmedWords = []
+        committed = ""
         confirmed = ""
         volatile = ""
         isStreaming = true
@@ -127,12 +140,16 @@ final class StreamingTranscriber {
     /// last two hypotheses agree on; everything after is volatile.
     private func applyLocalAgreement(to text: String) {
         let curr = Self.words(text)
-        let result = LocalAgreement.step(prev: prevWords, curr: curr, confirmed: confirmedWords)
-        confirmedWords = result.confirmed
+        // `displayStep` returns the locked `committed` prefix plus a coherent
+        // confirmed/volatile split of the current hypothesis (confirmed + volatile ==
+        // curr), so the live preview never duplicates a revised-but-committed word.
+        let result = LocalAgreement.displayStep(prev: prevWords, curr: curr, committed: confirmedWords)
+        confirmedWords = result.committed
+        committed = result.committed.joined(separator: " ")
         confirmed = result.confirmed.joined(separator: " ")
         volatile = result.volatile.joined(separator: " ")
         prevWords = curr
-        onUpdate?(confirmed, volatile)
+        onUpdate?(committed, confirmed, volatile)
     }
 
     // MARK: - Helpers
@@ -147,6 +164,7 @@ final class StreamingTranscriber {
         prevWords = []
         confirmedWords = []
         manager = nil
+        committed = ""
         confirmed = ""
         volatile = ""
         accepting = false

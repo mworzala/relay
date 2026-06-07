@@ -53,6 +53,25 @@ nonisolated enum LocalAgreement {
         return (newConfirmed, volatile)
     }
 
+    /// One step plus the **coherent display split** for the live preview.
+    ///
+    /// `step` keeps the locked prefix monotonic (good for off-mode injection) but its
+    /// `confirmed`+`volatile` can DUPLICATE text on screen: when curr revises an
+    /// already-committed word, the locked tail stays in `confirmed` while the revised
+    /// words reappear at the head of `volatile` (e.g. committed "…weird duplication",
+    /// volatile "weird duplication going on"). For display we instead partition the
+    /// *current* hypothesis itself: `confirmed` is curr's leading agreement with the
+    /// locked prefix and `volatile` is the rest, so `confirmed + volatile == curr`
+    /// always — no duplication, nothing dropped. `committed` is the locked prefix,
+    /// returned separately for off-mode (which must stay monotonic).
+    static func displayStep(prev: [String], curr: [String], committed: [String])
+        -> (committed: [String], confirmed: [String], volatile: [String]) {
+        let r = step(prev: prev, curr: curr, confirmed: committed)
+        // volatile == curr[shown...], so shown == curr.count - volatile.count.
+        let shown = curr.count - r.volatile.count
+        return (committed: r.confirmed, confirmed: Array(curr.prefix(shown)), volatile: r.volatile)
+    }
+
     /// Length of the longest case-insensitive shared word-prefix of `a` and `b`.
     private static func sharedPrefixCount(_ a: [String], _ b: [String]) -> Int {
         var n = 0

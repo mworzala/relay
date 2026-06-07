@@ -216,7 +216,7 @@ final class DictationController {
             }
         }
 
-        streaming.onUpdate = { [weak self] confirmed, volatile in
+        streaming.onUpdate = { [weak self] committed, confirmed, volatile in
             guard let self else { return }
             if self.sessionUsesIMK {
                 // Re-check secure input every update: macOS suspends third-party IMEs
@@ -228,10 +228,12 @@ final class DictationController {
                 } else {
                     // Show the in-flight hypothesis as the live underlined composition
                     // in the field itself; honor "live unconfirmed text" (off → only the
-                    // settled prefix is previewed). The final commit lands on release.
+                    // settled prefix is previewed). On uses the coherent confirmed+volatile
+                    // (== the current full hypothesis, so no duplicated revised words);
+                    // off uses the locked `committed`. The final commit lands on release.
                     let preview = self.settings.injectUnconfirmedText
                         ? HypothesisText.join(confirmed: confirmed, volatile: volatile)
-                        : confirmed
+                        : committed
                     // Post-process (ITN + user replacements) before previewing so the
                     // live composition matches the post-processed final commit.
                     let processed = TranscriptPostProcessor.apply(preview, settings: self.settings)
@@ -240,14 +242,15 @@ final class DictationController {
             } else {
                 switch self.sessionMode {
                 case .typeDirectly:
-                    // With "live unconfirmed text" on (default), inject confirmed + the
-                    // volatile tail — responsive, but the tail may rewrite/backspace as
-                    // it settles. Off injects only the committed prefix: it grows
-                    // monotonically, so the field appends smoothly and never
-                    // backspace-storms (the tail lands from the final pass on release).
+                    // With "live unconfirmed text" on (default), inject the coherent
+                    // confirmed + volatile tail (== the current full hypothesis) —
+                    // responsive, but the tail may rewrite/backspace as it settles. Off
+                    // injects only the locked `committed` prefix: it grows monotonically,
+                    // so the field appends smoothly and never backspace-storms (the tail
+                    // lands from the final pass on release).
                     let target = self.settings.injectUnconfirmedText
                         ? HypothesisText.join(confirmed: confirmed, volatile: volatile)
-                        : confirmed
+                        : committed
                     // Post-process (ITN + user replacements); the injector diffs, so
                     // collapsing e.g. "two"->"2" just re-types the changed tail.
                     self.injector.render(TranscriptPostProcessor.apply(target, settings: self.settings))

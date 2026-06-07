@@ -122,16 +122,18 @@ case "stream-file":
         var lastConfirmed = ""
         var confirmedRegressions = 0   // committed text that shrank/changed prefix (bad for injection)
         let transcriber = StreamingTranscriber()
-        transcriber.onUpdate = { confirmed, volatile in
+        transcriber.onUpdate = { committed, _, volatile in
             updateCount += 1
-            if !confirmed.hasPrefix(lastConfirmed) && !lastConfirmed.hasPrefix(confirmed) {
+            // Track the locked `committed` prefix — its monotonic growth is the
+            // injection-stability property this probe exists to verify.
+            if !committed.hasPrefix(lastConfirmed) && !lastConfirmed.hasPrefix(committed) {
                 confirmedRegressions += 1   // prefix changed (not a clean grow)
-            } else if confirmed.count < lastConfirmed.count {
+            } else if committed.count < lastConfirmed.count {
                 confirmedRegressions += 1   // shrank
             }
-            lastConfirmed = confirmed
+            lastConfirmed = committed
             let t = String(format: "%5.1fs", Date().timeIntervalSince(probeStart))
-            print("[\(t)] confirmed(\(confirmed.count)): …\(confirmed.suffix(36))  ||  vol: \(volatile.suffix(46))")
+            print("[\(t)] committed(\(committed.count)): …\(committed.suffix(36))  ||  vol: \(volatile.suffix(46))")
             fflush(stdout)
         }
         transcriber.start(manager: asr)
