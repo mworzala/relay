@@ -41,8 +41,31 @@ enum IMKInstaller {
 
     // MARK: - State queries
 
+    /// Whether the *current* helper is installed — identity-aware, not just a path
+    /// check. A bundle from a previous build can sit at `installURL` with a different
+    /// `CFBundleIdentifier` (e.g. after the org-id rename: an old
+    /// `com.relay.inputmethod.RelayInputMethod` lingering where the new
+    /// `com.mattworzala…` one belongs). The wrapper filename doesn't carry the org
+    /// id, so a path-only check reads stale as installed and soft-locks setup in
+    /// `.needsActivation` (no reinstall affordance). Treating an id-mismatched bundle
+    /// as not-installed reopens the **Set up** path, which overwrites it with the
+    /// embedded current build.
     static func isInstalled() -> Bool {
-        FileManager.default.fileExists(atPath: installURL.path)
+        installedBundleID() == IMKMessaging.helperBundleID
+    }
+
+    /// The `CFBundleIdentifier` of whatever helper is currently at `installURL`, or
+    /// nil if nothing is installed there / it isn't a readable bundle. Reads the
+    /// `Info.plist` straight off disk rather than via `Bundle(url:)` — `Bundle`
+    /// caches per URL process-wide, so right after `install()` overwrites the bundle
+    /// in place it would hand back the *previous* build's id.
+    static func installedBundleID() -> String? {
+        let plistURL = installURL.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization
+                  .propertyList(from: data, format: nil) as? [String: Any]
+        else { return nil }
+        return plist["CFBundleIdentifier"] as? String
     }
 
     /// Our selectable input *mode* (the entry that can actually be enabled/selected).
@@ -83,6 +106,43 @@ enum IMKInstaller {
         let regStatus = TISRegisterInputSource(installURL as CFURL)
         NSLog("Relay/imk: TISRegisterInputSource → \(regStatus)")
         return .ok
+    }
+
+    /// Re-copy the embedded helper over the installed one when they differ, so a
+    /// rebuilt app doesn't keep running a *stale* installed helper. This matters most
+    /// in dev, where the helper changes on every build but `isInstalled()` (a bundle-
+    /// id match) stays true, so nothing would otherwise refresh the copy in
+    /// `~/Library/Input Methods/`. Compares the helper executable's modification date
+    /// (a fresh build's embedded payload is strictly newer); terminates a running
+    /// helper first so the file can be replaced, and the caller's `start()` relaunches
+    /// it. No-op when not installed, already current, or there's no embedded payload.
+    @discardableResult
+    static func refreshInstalledHelperIfStale() -> Bool {
+        guard isInstalled(), let embedded = embeddedAppURL else { return false }
+        guard let embeddedDate = helperExecutableModDate(embedded),
+              let installedDate = helperExecutableModDate(installURL),
+              embeddedDate > installedDate else { return false }
+
+        IMKProcessManager.terminate()
+        let fm = FileManager.default
+        do {
+            try fm.removeItem(at: installURL)
+            try fm.copyItem(at: embedded, to: installURL)
+        } catch {
+            NSLog("Relay/imk: helper refresh failed: \(error.localizedDescription)")
+            return false
+        }
+        let regStatus = TISRegisterInputSource(installURL as CFURL)
+        NSLog("Relay/imk: refreshed stale installed helper, TISRegisterInputSource → \(regStatus)")
+        return true
+    }
+
+    /// Modification date of the helper's Mach-O executable inside an `.app`. The
+    /// executable name is the (variant-stable) `PRODUCT_NAME`, "RelayInputMethod".
+    private static func helperExecutableModDate(_ appURL: URL) -> Date? {
+        let exe = appURL.appendingPathComponent("Contents/MacOS/RelayInputMethod")
+        let attrs = try? FileManager.default.attributesOfItem(atPath: exe.path)
+        return attrs?[.modificationDate] as? Date
     }
 
     /// Deep link to System Settings ▸ Keyboard, where the user can add Relay under

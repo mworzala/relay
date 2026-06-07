@@ -65,14 +65,25 @@ final class IMKController {
 
     /// Bring IMK online if the user left it enabled. Called once after launch.
     func start() {
+        // Keep the installed helper in sync with *this* build's embedded payload
+        // before evaluating state. In dev the helper changes on every build, but the
+        // install path and (now id-aware) `isInstalled()` stay constant, so without
+        // this the app would keep launching a stale installed copy.
+        IMKInstaller.refreshInstalledHelperIfStale()
         refreshState()
         reconcileEngagement()
     }
 
     /// Tear down on app quit: restore the user's source and stop the helper.
+    ///
+    /// Disposes **unconditionally** — it must NOT gate on `settings.imkEnabled`. A
+    /// helper can be alive even with the feature toggled off: TSM spawns one whenever
+    /// our input source is selected, and a session that was enabled then disabled may
+    /// have left one running. It must never outlive Relay, and the user must not be
+    /// stranded on Relay's IME after quit (`deactivate` restores their source; a no-op
+    /// when we never engaged).
     func shutdown() {
         stopPollingForActivation()
-        guard settings.imkEnabled else { return }
         strategy.deactivate(memory: memory)
         ipc.stop()
         IMKProcessManager.terminate()

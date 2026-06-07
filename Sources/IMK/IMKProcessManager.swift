@@ -32,10 +32,25 @@ enum IMKProcessManager {
     }
 
     /// Terminate any running helper instance(s) (feature disabled / app quitting).
+    ///
+    /// Graceful first, then force-kill any survivor. During app quit there's little
+    /// time for the AppleEvent `terminate()` to land before Relay exits, so a plain
+    /// graceful request alone would let the helper outlive the app (a stranded
+    /// IMKServer keeps the input source alive and can be re-bound). We give it a
+    /// bounded moment — spinning the run loop rather than sleeping so the main thread
+    /// stays responsive during termination — then `forceTerminate` anything left.
     static func terminate() {
-        for app in NSRunningApplication
-            .runningApplications(withBundleIdentifier: IMKMessaging.helperBundleID) {
-            app.terminate()
+        func running() -> [NSRunningApplication] {
+            NSRunningApplication.runningApplications(withBundleIdentifier: IMKMessaging.helperBundleID)
         }
+        let initial = running()
+        guard !initial.isEmpty else { return }
+        for app in initial { app.terminate() }
+
+        let deadline = Date().addingTimeInterval(0.4)
+        while Date() < deadline, !running().isEmpty {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        for app in running() { app.forceTerminate() }
     }
 }
