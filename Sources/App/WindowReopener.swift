@@ -14,6 +14,10 @@ final class WindowReopener {
     private init() {}
 
     func reopenConfigWindow() {
+        // Coming back from the Dock-less accessory state the app enters when its
+        // window closes: restore the regular policy so the Dock icon + menu bar
+        // return alongside the window. A no-op if we're already regular.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
         // If the config window already exists (e.g. just hidden), bring it forward.
