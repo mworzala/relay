@@ -41,6 +41,21 @@ final class DictationController {
 
     private var armTask: Task<Void, Never>?
 
+    /// Double-tap-to-latch detection. A double-tap of the hold-to-talk key starts a
+    /// hands-free session that keeps listening after the key is released and only
+    /// stops on the next tap. Pure/testable; fed monotonic timestamps below.
+    private var tapTracker = DoubleTapTracker()
+    /// Set on the *second* tap's key-down (a recognized double-tap), consumed by
+    /// `beginDictation` into `sessionLatched`. While true, the second tap's release
+    /// must NOT cancel arming — the arm timer fires into a latched session.
+    @ObservationIgnored private var pendingLatch = false
+    /// True for the duration of a latched (double-tap) session: releasing the key
+    /// does not finalize, and the next key-down stops it.
+    @ObservationIgnored private var sessionLatched = false
+
+    /// Monotonic seconds (immune to wall-clock changes) for double-tap timing.
+    private var monotonicNow: Double { ProcessInfo.processInfo.systemUptime }
+
     /// Stats captured at session start (where the text lands and when it began),
     /// read back at `finish()`. The pill is a `NonActivatingPanel`, so the target
     /// app stays frontmost while the user holds to talk — capturing at *start* is
@@ -63,7 +78,9 @@ final class DictationController {
     @ObservationIgnored private var imkNextChar: Character?
 
     /// Hooks for later milestones (injection, overlay). Set by the app wiring.
-    @ObservationIgnored var onSessionStart: (() -> Void)?
+    /// `latched` is true when a double-tap started a hands-free session, so the
+    /// overlay can show a "locked" indicator.
+    @ObservationIgnored var onSessionStart: ((_ latched: Bool) -> Void)?
     @ObservationIgnored var onHypothesis: (@MainActor (_ confirmed: String, _ volatile: String) -> Void)?
     @ObservationIgnored var onSessionFinish: (@MainActor (_ finalText: String) -> Void)?
     /// Overlay-paste mode hooks (wired to `TranscriptOverlayController` by `AppModel`):
@@ -113,7 +130,10 @@ final class DictationController {
     }
 
     /// Re-read the keybind after the user changes it.
-    func keybindChanged() { hotkey.setKeybind(settings.keybind) }
+    func keybindChanged() {
+        hotkey.setKeybind(settings.keybind)
+        tapTracker.reset()   // drop any in-flight tap so the new bind starts clean
+    }
 
     /// The microphone lost its device mid-dictation and couldn't reroute. New audio
     /// has stopped; the session rides out on the already-buffered audio and finalizes
@@ -126,11 +146,23 @@ final class DictationController {
     // MARK: - Hotkey transitions
 
     private func handlePress() {
+        // A latched (double-tap) session is running: this key-down is the "tap to
+        // stop" gesture. Finalize and return — don't start a new session.
+        if phase == .listening, sessionLatched {
+            sessionLatched = false
+            tapTracker.reset()   // this stop-tap must not seed a new double-tap
+            Task { await finish() }
+            return
+        }
         guard phase == .idle else { return }
         guard asr.isReady, asr.asrManager != nil else {
             NSLog("Relay: hotkey pressed but model not ready (status not .ready)")
             return
         }
+        // Is this the second tap of a double-tap? If so, this session will latch
+        // (the arm timer fires into a hands-free session even after the key is
+        // released). Only consult the tracker when the feature is enabled.
+        pendingLatch = settings.enableDoubleTapLock && tapTracker.registerPress(at: monotonicNow)
         phase = .arming
         // Warm the mic and start buffering audio immediately on key-down, so the
         // hardware startup latency (~0.3–0.5s) overlaps the arm delay and the
@@ -148,11 +180,21 @@ final class DictationController {
     }
 
     private func handleRelease() {
-        armTask?.cancel()
         switch phase {
+        case .arming where pendingLatch:
+            // Second tap of a double-tap: leave the arm timer running so it fires into
+            // a latched session. Releasing the key is part of the gesture, not a stop.
+            return
         case .arming:
+            armTask?.cancel()
             cancelArming()          // quick tap — never really started
+            // A quick tap is eligible as the first half of a double-tap: the next
+            // quick key-down within the window latches a hands-free session.
+            if settings.enableDoubleTapLock { tapTracker.registerQuickTap() }
         case .listening:
+            // Latched sessions ignore the release entirely — only a fresh tap stops
+            // them (handled in handlePress). Hold-to-talk finalizes on release.
+            if sessionLatched { return }
             Task { await finish() }
         case .idle, .finishing:
             break
@@ -164,6 +206,11 @@ final class DictationController {
     private func beginDictation() {
         guard let manager = asr.asrManager else { cancelArming(); return }
         phase = .listening
+        // Promote the pending double-tap into a latched session. The gesture is now
+        // consumed; the stop is a fresh single tap, so clear the tracker.
+        sessionLatched = pendingLatch
+        pendingLatch = false
+        if sessionLatched { tapTracker.reset() }
 
         // Capture the target app + start time before injection begins. The
         // frontmost app is where the dictation will land (the pill never steals
@@ -270,7 +317,7 @@ final class DictationController {
         // The mic has been capturing since key-down (handlePress) into the streaming
         // pre-roll; start now begins inference over that buffer + the live audio.
         streaming.start(manager: manager)
-        onSessionStart?()
+        onSessionStart?(sessionLatched)
         // Publish after `onSessionStart` (which calls overlay.show() → resets the
         // strip) so the IMK indicator sticks; the async prefix capture updates it.
         if sessionUsesIMK { publishIMKDiagnostics(op: "engaged") }
@@ -281,6 +328,8 @@ final class DictationController {
     private func cancelArming() {
         mic.endCapture()
         streaming.cancel()
+        pendingLatch = false
+        sessionLatched = false
         phase = .idle
     }
 
@@ -337,6 +386,7 @@ final class DictationController {
         sessionStart = nil
         sessionAppBundleID = nil
         sessionAppName = nil
+        sessionLatched = false
         onSessionFinish?(finalText)
         phase = .idle
     }

@@ -14,6 +14,9 @@ final class AppSettings {
     var keybind: Keybind
     var launchAtLogin: Bool
     var firstRunComplete: Bool
+    /// Double-tap the hold-to-talk key to start a hands-free session that keeps
+    /// listening after you release and only stops on the next tap. Default on.
+    var enableDoubleTapLock: Bool
     /// Type low-confidence words live and correct them as you speak (responsive,
     /// may briefly rewrite/backspace). Off = inject only the committed prefix
     /// (smooth, append-only, slightly delayed). Default on.
@@ -41,6 +44,7 @@ final class AppSettings {
         var keybind: Keybind
         var launchAtLogin: Bool
         var firstRunComplete: Bool
+        var enableDoubleTapLock: Bool?         // added later; nil in old files → default on
         var injectUnconfirmedText: Bool?       // added later; nil in old files → default on
         var insertionMode: InsertionMode?      // added later; nil in old files → .typeDirectly
         var imkEnabled: Bool?                  // added later; nil in old files → false
@@ -58,6 +62,7 @@ final class AppSettings {
             keybind = snap.keybind
             launchAtLogin = snap.launchAtLogin
             firstRunComplete = snap.firstRunComplete
+            enableDoubleTapLock = snap.enableDoubleTapLock ?? true
             injectUnconfirmedText = snap.injectUnconfirmedText ?? true
             insertionMode = snap.insertionMode ?? .typeDirectly
             imkEnabled = snap.imkEnabled ?? false
@@ -70,6 +75,7 @@ final class AppSettings {
             keybind = .rightCommand
             launchAtLogin = false
             firstRunComplete = false
+            enableDoubleTapLock = true
             injectUnconfirmedText = true
             insertionMode = .typeDirectly
             imkEnabled = false
@@ -111,6 +117,7 @@ final class AppSettings {
             keybind: keybind,
             launchAtLogin: launchAtLogin,
             firstRunComplete: firstRunComplete,
+            enableDoubleTapLock: enableDoubleTapLock,
             injectUnconfirmedText: injectUnconfirmedText,
             insertionMode: insertionMode,
             imkEnabled: imkEnabled,

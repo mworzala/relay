@@ -13,6 +13,9 @@ final class OverlayController {
 
     private(set) var levels: [Float] = Array(repeating: 0, count: barCount)
     private(set) var elapsed: TimeInterval = 0
+    /// True while a latched (double-tap) hands-free session is active, so the pill
+    /// shows a lock glyph cueing the user to tap again to stop.
+    private(set) var locked = false
 
     /// Debug-only diagnostics shown in a strip above the pill (gated on
     /// `RelayDebug.overlayEnabled`). Generic field bag — see `OverlayDiagnostics`.
@@ -38,10 +41,11 @@ final class OverlayController {
     /// Gap between the top of the pill and the bottom of the diagnostics strip.
     private static let diagnosticsGap: CGFloat = 6
 
-    func show() {
+    func show(locked: Bool = false) {
         showGeneration &+= 1
         levels = Array(repeating: 0, count: Self.barCount)
         elapsed = 0
+        self.locked = locked
         startDate = Date()
         ensurePanel()
         positionPanel()

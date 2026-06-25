@@ -9,6 +9,7 @@ struct KeybindSection: View {
     @State private var recorder = KeybindRecorder()
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             Section {
                 LabeledContent("Hold-to-talk") {
@@ -29,6 +30,14 @@ struct KeybindSection: View {
                 Text("Shortcut")
             } footer: {
                 Text("Press and hold this key to dictate; release to finalize. The observer is fully passive — your keyboard behaves normally when you're not dictating, and modifier combos still reach other apps.")
+                    .font(.caption)
+            }
+
+            Section {
+                Toggle("Double-tap to lock", isOn: $settings.enableDoubleTapLock)
+                    .onChange(of: settings.enableDoubleTapLock) { _, _ in settings.save() }
+            } footer: {
+                Text("Quickly double-tap the shortcut to start a hands-free session: it keeps listening after you let go and only stops when you tap the shortcut again. A lock appears on the pill while it's active. A single hold still works as usual.")
                     .font(.caption)
             }
         }

@@ -8,12 +8,21 @@ struct PillView: View {
     var body: some View {
         GlassEffectContainer {
             HStack(spacing: 12) {
+                if controller.locked {
+                    // Hands-free (double-tap) session: cue that a tap is needed to stop.
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.tint)
+                        .transition(.scale.combined(with: .opacity))
+                        .help("Locked — tap your shortcut again to stop")
+                }
                 WaveformView(levels: controller.levels)
                     .frame(width: 116, height: 24)
                 Text(timeString)
                     .font(.system(.callout, design: .rounded).monospacedDigit().weight(.medium))
                     .foregroundStyle(.secondary)
             }
+            .animation(.easeOut(duration: 0.18), value: controller.locked)
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
             .glassEffect(

@@ -57,7 +57,7 @@ final class AppModel {
         // Wire the dictation lifecycle to the floating pill (shown in both modes).
         overlay.levelSource = { [mic] in mic.level }
         overlay.micNameSource = { [mic] in mic.activeDevice?.name }
-        dictation.onSessionStart = { [overlay] in overlay.show() }
+        dictation.onSessionStart = { [overlay] latched in overlay.show(locked: latched) }
         dictation.onSessionFinish = { [overlay] _ in overlay.hide() }
 
         // Debug-only: surface the IMK insertion path in the diagnostics strip (the
